@@ -48,7 +48,12 @@ import {
   resolveMessageSenderThreadId,
   sendThreadMessage,
 } from "./thread-send.js";
-import { requestThreadStopForCurrentState } from "./thread-lifecycle.js";
+import {
+  requestThreadStopForCurrentState,
+  requireNoThreadConfigurationTransition,
+} from "./thread-lifecycle.js";
+import { requireThreadAdoptionContextWritable } from "./thread-reservations.js";
+import { withThreadSendGuard } from "./thread-context-mutation-guard.js";
 import { getLeadingAgentOnlyInput } from "./deferred-first-turn-context.js";
 
 type ThreadRewindPrepareCommand = Extract<
@@ -398,6 +403,21 @@ export async function editThreadMessage(
     thread: Thread;
   },
 ): Promise<EditMessageResponse> {
+  return withThreadSendGuard(args.thread.id, () =>
+    editThreadMessageWithGuard(deps, args),
+  );
+}
+
+async function editThreadMessageWithGuard(
+  deps: LoggedPendingInteractionWorkSessionDeps,
+  args: {
+    environment: Parameters<typeof requireReadyThreadEnvironment>[0];
+    payload: EditMessageRequest;
+    thread: Thread;
+  },
+): Promise<EditMessageResponse> {
+  requireNoThreadConfigurationTransition(args.thread.id);
+  requireThreadAdoptionContextWritable(deps.db, args.thread.id);
   if (!deps.providerRegistry.supportsSessionRewind(args.thread.providerId)) {
     conflict(`Editing messages is not supported for ${args.thread.providerId}`);
   }
@@ -517,6 +537,8 @@ export async function editThreadMessage(
   try {
     await sendThreadMessage(deps, {
       beforeAppendInTransaction: ({ tx }) => {
+        requireNoThreadConfigurationTransition(editableThread.id);
+        requireThreadAdoptionContextWritable(tx, editableThread.id);
         if (getActivePendingInteractionForThread(tx, editableThread.id)) {
           conflict(
             "Resolve the pending interaction before editing the message",

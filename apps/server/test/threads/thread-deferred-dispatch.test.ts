@@ -22,6 +22,9 @@ import {
   seedEnvironment,
   seedHostSession,
   seedProjectWithSource,
+  seedThread,
+  seedThreadFixture,
+  seedThreadRuntimeState,
 } from "../helpers/seed.js";
 import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 
@@ -60,6 +63,120 @@ async function reserve(
 }
 
 describe("deferred first dispatch", () => {
+  it("reserves legacy unmanaged idle adoption only after exact provider release", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread, project, environment } = seedThreadFixture(harness);
+      const sibling = seedThread(harness.deps, {
+        projectId: project.id,
+        environmentId: environment.id,
+      });
+      seedThreadRuntimeState(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        providerThreadId: "legacy-native-session",
+      });
+      seedThreadRuntimeState(harness.deps, {
+        threadId: sibling.id,
+        environmentId: environment.id,
+        providerThreadId: "sibling-native-session",
+      });
+      const siblingEvents = listEvents(harness.db, { threadId: sibling.id });
+      const shown = await harness.app.request(`/api/v1/threads/${thread.id}`);
+      expect(await shown.json()).toMatchObject({
+        id: thread.id,
+        status: "idle",
+        dispatchReservation: null,
+        configurationRelease: null,
+      });
+      expect(readThreadProviderConfiguration(harness.db, thread.id)).toBeNull();
+      const guessedGeneration = await harness.app.request(
+        `/api/v1/threads/${thread.id}/configuration/release`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ configurationGeneration: 0 }),
+        },
+      );
+      expect(guessedGeneration.status).toBe(409);
+      expect(await guessedGeneration.text()).toContain(
+        "configuration_generation_stale",
+      );
+      const releaseRequest = Promise.resolve(
+        harness.app.request(
+          `/api/v1/threads/${thread.id}/configuration/release`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              configurationGeneration: null,
+              expectedProviderSessionId: "legacy-native-session",
+            }),
+          },
+        ),
+      );
+      const stop = await Promise.race([
+        waitForQueuedCommand(
+          harness,
+          ({ command }) =>
+            command.type === "thread.stop" && command.threadId === thread.id,
+        ),
+        releaseRequest.then(async (response) => {
+          expect(response.status, await response.clone().text()).toBe(200);
+          throw new Error(
+            "Adoption completed before provider release acknowledgement",
+          );
+        }),
+      ]);
+      if (stop.command.type !== "thread.stop")
+        throw new Error("Expected exact legacy provider release");
+      expect(stop.command.intent).toBe("release");
+      expect(
+        listQueuedThreadCommands(harness, "thread.stop", sibling.id),
+      ).toEqual([]);
+      await reportQueuedCommandSuccess(
+        harness,
+        { ...stop, command: stop.command },
+        { providerCheckpointId: null },
+      );
+      const response = await releaseRequest;
+      expect(response.status, await response.clone().text()).toBe(200);
+      const adopted = await response.json();
+      expect(adopted).toMatchObject({
+        id: thread.id,
+        status: "idle",
+        configurationRelease: null,
+        dispatchReservation: {
+          purpose: "configuration-adoption",
+          attemptId: expect.any(String),
+          stoppedAt: expect.any(Number),
+          providerSessionId: "legacy-native-session",
+          state: "reserved",
+        },
+      });
+      expect(adopted).not.toHaveProperty("configurationGeneration");
+      expect(adopted).not.toHaveProperty("configurationDelivery");
+      const blocked = await harness.app.request(
+        `/api/v1/threads/${thread.id}/send`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            input: textInput("Before first managed configuration"),
+            mode: "auto",
+          }),
+        },
+      );
+      expect(blocked.status).toBe(409);
+      expect(
+        listQueuedThreadCommands(harness, "turn.submit", thread.id),
+      ).toEqual([]);
+      expect(listEvents(harness.db, { threadId: sibling.id })).toEqual(
+        siblingEvents,
+      );
+      expect(getThread(harness.db, sibling.id)?.status).toBe("idle");
+    });
+  });
+
   it("prepares the exact provider session without a model prompt and fences stale generations", async () => {
     await withTestHarness(async (harness) => {
       const { thread } = await reserve(harness, 7);

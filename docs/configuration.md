@@ -1409,3 +1409,22 @@ closed or return explicit unavailable readback; delivered is never applied.
 old delivery, and sets `configurationRelease`. That durable marker blocks direct
 and queued dispatch until an advanced generation is prepared by a distinct native
 provider instance. Home changes and hot active-provider updates are refused.
+
+For an existing unmanaged conversation, authenticated thread GET exposes the
+actual `providerSessionId:string|null` independently of delivery. Initial
+`threads.releaseConfiguration({threadId,configurationGeneration:null,expectedProviderSessionId})`
+requires an idle exact retained session and acknowledged provider stop. It creates
+an adoption-purpose dispatch reservation, not configuration or delivery:
+`{purpose:"configuration-adoption",attemptId,providerSessionId,stoppedAt,expiresAt,state}`.
+Its fixed five-minute lease is not renewed by GET, polling or live replay; expiry
+retains the conversation and its dispatch fence. Only that thread is released.
+
+PATCH and prepare carry `adoptionAttemptId` and keep the original native session
+and immutable home. Explicit failed/expired recovery without real delivery uses
+`recoverAdoption:{attemptId,expectedNativeContext}` plus the exact expected native
+session. Generation/context are both null before PATCH or match actual numeric
+generation/native context afterwards. Stale attempt or state receives typed 409
+without mutation; a fresh recovery repeats trusted stop and gets a new finite
+attempt. Real exact managed delivery switches recovery to ordinary numeric release.
+Preparation remains bounded to at most60s, dispatch remains separately gated, and
+no reservation or delivered status establishes required provider application.

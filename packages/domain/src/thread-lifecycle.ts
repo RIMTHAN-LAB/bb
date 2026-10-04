@@ -67,6 +67,7 @@ export const THREAD_LIFECYCLE: Record<
   error: {
     "run.preparing": "starting",
     "run.started": "active",
+    "stop.settled": "idle",
   },
 };
 

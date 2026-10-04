@@ -39,6 +39,7 @@ import { resolveEnvironmentWorkspaceDisplayKind } from "../environments/environm
 import { canThreadSpawnChild } from "./thread-parent.js";
 import { toThreadEventWithMeta } from "./timeline.js";
 import { readDispatchReservation } from "./thread-reservations.js";
+import { getLastProviderThreadId } from "./thread-events.js";
 import {
   readThreadConfigurationDelivery,
   readThreadProviderConfiguration,
@@ -360,6 +361,7 @@ export function toThreadResponseFromThread(
   const delivery = readThreadConfigurationDelivery(deps.db, args.thread.id);
   return {
     ...threadWithRuntime,
+    providerSessionId: getLastProviderThreadId(deps, args.thread.id),
     dispatchReservation:
       args.thread.archivedAt === null && args.thread.deletedAt === null
         ? readDispatchReservation(deps.db, args.thread.id)

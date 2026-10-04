@@ -37,6 +37,7 @@ import { recoverThreadModelOverride } from "./thread-execution-override.js";
 import {
   ensureThreadCanStartRequest,
   prepareReadyThreadTurnCommand,
+  requireNoThreadConfigurationTransition,
 } from "./thread-lifecycle.js";
 import { applyLoggedThreadLifecycleEventInTransaction } from "./lifecycle-outcome.js";
 import {
@@ -70,6 +71,14 @@ import {
   requireDeferredFirstTurnContextCurrent,
   resolveDeferredFirstTurnContext,
 } from "./deferred-first-turn-context.js";
+import {
+  consumeDispatchReservation,
+  requireUnexpiredDispatchReservation,
+} from "./thread-reservations.js";
+import {
+  consumeThreadConfigurationRelease,
+  requirePreparedThreadConfiguration,
+} from "./thread-provider-configuration.js";
 
 type SendThreadMessageMode = SendMessageRequest["mode"];
 type TextPromptInput = Extract<PromptInput, { type: "text" }>;
@@ -405,6 +414,9 @@ export async function sendThreadMessage(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: SendThreadMessageArgs,
 ): Promise<void> {
+  requireNoThreadConfigurationTransition(args.thread.id);
+  requirePreparedThreadConfiguration(deps.db, args.thread.id);
+  requireUnexpiredDispatchReservation(deps.db, args.thread.id);
   if (isStandaloneBuiltinClearCommand(args.payload.input)) {
     await clearThreadContext(deps, {
       environment: args.environment,
@@ -476,7 +488,14 @@ async function sendThreadMessageWithoutContextClear(
   const beforeAppendInTransaction: SendThreadMessageTransactionPreflight = ({
     tx,
   }) => {
+    requireNoThreadConfigurationTransition(thread.id);
+    requirePreparedThreadConfiguration(tx, thread.id);
+    requireUnexpiredDispatchReservation(tx, thread.id);
     args.beforeAppendInTransaction?.({ tx });
+    if (payload.input.length > 0) {
+      consumeDispatchReservation(tx, thread.id);
+      consumeThreadConfigurationRelease(tx, thread.id);
+    }
     if (deferredFirstTurnContext) {
       requireDeferredFirstTurnContextCurrent(tx, {
         requestSequence: deferredFirstTurnContext.requestSequence,

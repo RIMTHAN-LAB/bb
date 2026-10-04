@@ -390,11 +390,7 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
 
   post(routes.releaseConfiguration, async (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
-    await releaseThreadConfiguration(
-      deps,
-      thread.id,
-      payload.configurationGeneration,
-    );
+    await releaseThreadConfiguration(deps, thread.id, payload);
     return context.json(
       toThreadResponseFromThread(deps, {
         thread: requirePublicThread(deps.db, thread.id),

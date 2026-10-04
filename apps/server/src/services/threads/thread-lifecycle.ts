@@ -1470,30 +1470,36 @@ async function runAwaitedThreadStopCommand(
     threadId: string;
   },
 ): Promise<void> {
-  await threadStopRequestDeduper.run(args.threadId, async () => {
-    inFlightThreadRpcGuard.claim(args.threadId, "thread.stop");
-    try {
-      await runLiveHostCommand(deps, {
-        command: args.command,
-        hostId: args.hostId,
-        timeoutMs: AWAITED_THREAD_STOP_TIMEOUT_MS,
-      });
-    } catch (error) {
-      deps.logger.warn(
-        { err: error, intent: args.command.intent, threadId: args.threadId },
-        "Awaited thread stop command failed",
-      );
-      if (args.requireStopped) throw error;
-      if (
-        args.command.intent === "release" &&
-        !isHostUnavailableApiError(error)
-      ) {
-        throw error;
+  try {
+    const stopIdentity = JSON.stringify([args.hostId, args.command]);
+    await threadStopRequestDeduper.run(stopIdentity, async () => {
+      if (!inFlightThreadRpcGuard.claim(args.threadId, "thread.stop"))
+        throw new ApiError(
+          409,
+          "thread_stop_busy",
+          "A different stop command is already in flight for this thread",
+        );
+      try {
+        await runLiveHostCommand(deps, {
+          command: args.command,
+          hostId: args.hostId,
+          timeoutMs: AWAITED_THREAD_STOP_TIMEOUT_MS,
+        });
+      } finally {
+        inFlightThreadRpcGuard.release(args.threadId, "thread.stop");
       }
-    } finally {
-      inFlightThreadRpcGuard.release(args.threadId, "thread.stop");
-    }
-  });
+    });
+  } catch (error) {
+    deps.logger.warn(
+      { err: error, intent: args.command.intent, threadId: args.threadId },
+      "Awaited thread stop command failed",
+    );
+    if (
+      args.requireStopped ||
+      (args.command.intent === "release" && !isHostUnavailableApiError(error))
+    )
+      throw error;
+  }
 }
 
 export function requestActiveRuntimeThreadStopIfNeeded(

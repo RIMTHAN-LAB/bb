@@ -646,6 +646,7 @@ function liftThreadListPlaceholder(
     activeBackgroundAgentCount: thread.activity.activeBackgroundAgentCount,
     canSpawnChild: false,
     queuedMessageCount: 0,
+    providerSessionId: null,
   };
 }
 

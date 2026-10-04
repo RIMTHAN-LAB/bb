@@ -44,6 +44,7 @@ flowchart LR
     stopping -->|"run.failed ⟨notDeleted⟩"| error
     error -->|"run.preparing ⟨notArchived, notDeleted⟩"| starting
     error -->|"run.started ⟨notArchived, notDeleted⟩"| active
+    error -->|"stop.settled"| idle
 ```
 
 ## Environment

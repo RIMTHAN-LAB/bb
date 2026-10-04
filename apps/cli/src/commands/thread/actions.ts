@@ -1,12 +1,13 @@
 import { Command } from "commander";
 import { randomUUID } from "node:crypto";
 import {
+  nativeContextSchema,
   threadVisibilitySchema,
   type PermissionMode,
   type ReasoningLevel,
   type ServiceTier,
-  type ThreadVisibility,
 } from "@bb/domain";
+import type { UpdateThreadRequest } from "@bb/server-contract";
 import { action } from "../../action.js";
 import { createCliBbSdk } from "../../client.js";
 import type { ThreadRetryResult, ThreadSendResult } from "@bb/sdk";
@@ -43,6 +44,10 @@ interface ThreadUpdateCommandOptions {
   model?: string;
   reasoningLevel?: string;
   visibility?: string;
+  nativeContextJson?: string;
+  configurationGeneration?: string;
+  adoptionAttempt?: string;
+  releaseProviderSession?: boolean;
 }
 
 interface ThreadArchiveCommandOptions {
@@ -125,14 +130,7 @@ type PostThreadMessageResult = ThreadSendResult & {
   mode: ThreadTellDeliveryMode;
 };
 
-interface ThreadUpdateBody {
-  title?: string;
-  sectionId?: string | null;
-  parentThreadId?: string | null;
-  model?: string;
-  reasoningLevel?: ReasoningLevel;
-  visibility?: ThreadVisibility;
-}
+type ThreadUpdateBody = UpdateThreadRequest;
 
 export function registerActionsCommands(
   parent: Command,
@@ -157,6 +155,22 @@ export function registerActionsCommands(
       "Set the sticky reasoning level applied on the thread's next turn: low, medium, high, xhigh, max (provider-dependent)",
     )
     .option("--visibility <visibility>", "Thread visibility: visible or hidden")
+    .option(
+      "--native-context-json <json>",
+      "Exact native home and protected path/hash references",
+    )
+    .option(
+      "--configuration-generation <number>",
+      "Exact desired configuration generation",
+    )
+    .option(
+      "--adoption-attempt <id>",
+      "Exact retained-conversation adoption attempt",
+    )
+    .option(
+      "--release-provider-session",
+      "Release the current idle provider before advancing its configuration",
+    )
     .action(
       action(
         async (id: string | undefined, opts: ThreadUpdateCommandOptions) => {
@@ -181,10 +195,12 @@ export function registerActionsCommands(
             !opts.title &&
             !opts.model &&
             !reasoningLevel &&
-            !visibility
+            !visibility &&
+            opts.nativeContextJson === undefined &&
+            opts.configurationGeneration === undefined
           ) {
             throw new Error(
-              "No changes requested. Provide --title, --parent-thread, --clear-parent-thread, --section, --clear-section, --model, --reasoning-level, or --visibility.",
+              "No changes requested. Provide --title, --parent-thread, --clear-parent-thread, --section, --clear-section, --model, --reasoning-level, --visibility, --native-context-json, or --configuration-generation.",
             );
           }
 
@@ -218,6 +234,25 @@ export function registerActionsCommands(
           }
           if (visibility) {
             body.visibility = visibility;
+          }
+          if (opts.nativeContextJson !== undefined) {
+            body.nativeContext = nativeContextSchema.parse(
+              JSON.parse(opts.nativeContextJson),
+            );
+          }
+          if (opts.configurationGeneration !== undefined) {
+            const generation = Number(opts.configurationGeneration);
+            if (!Number.isSafeInteger(generation) || generation < 0)
+              throw new Error(
+                "--configuration-generation must be a nonnegative integer",
+              );
+            body.configurationGeneration = generation;
+          }
+          if (opts.adoptionAttempt !== undefined) {
+            body.adoptionAttemptId = opts.adoptionAttempt;
+          }
+          if (opts.releaseProviderSession) {
+            body.releaseProviderSession = true;
           }
 
           const sdk = createCliBbSdk(getUrl());

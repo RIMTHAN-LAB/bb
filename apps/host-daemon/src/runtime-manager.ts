@@ -220,6 +220,13 @@ export interface RuntimeManagerReapIdleProviderSessionsResult {
 
 type ReleaseThreadActiveTurnPolicy = "interrupt" | "keep";
 
+export class ThreadReleaseBusyError extends Error {
+  constructor(threadId: string) {
+    super(`Thread ${threadId} has active or pending provider work`);
+    this.name = "ThreadReleaseBusyError";
+  }
+}
+
 interface ReleaseThreadFromOtherEnvironmentsResult {
   activeTurnEnvironmentIds: string[];
   providerCheckpointId: string | null;
@@ -393,6 +400,41 @@ export class RuntimeManager {
     );
   }
 
+  async releaseThreadForConfiguration(args: {
+    environmentId: string;
+    threadId: string;
+  }): Promise<{ providerCheckpointId: string | null }> {
+    return this.enqueueThreadControl(args.threadId, async () => {
+      const pending = [...this.pendingEntries.keys()].some((key) => {
+        if (key === args.environmentId) return true;
+        if (!key.startsWith("[")) return false;
+        try {
+          const profile: unknown = JSON.parse(key);
+          return Array.isArray(profile) && profile[1] === args.threadId;
+        } catch {
+          return false;
+        }
+      });
+      const inFlight = [
+        ...this.inFlightThreadCommandsByEnvironmentId.values(),
+      ].some((commands) => commands.has(args.threadId));
+      const owners = this.listThreadOwnerEntries(args.threadId);
+      if (
+        pending ||
+        inFlight ||
+        owners.some(
+          (entry) => entry.runtime.getActiveTurnId(args.threadId) !== null,
+        ) ||
+        [...this.entries.values()].some((entry) =>
+          entry.runtime.getLiveThreadIds().includes(args.threadId),
+        )
+      ) {
+        throw new ThreadReleaseBusyError(args.threadId);
+      }
+      return this.stopThreadOwnerEntries(owners, args.threadId);
+    });
+  }
+
   private async waitForThreadCommandsInOtherEnvironments(args: {
     environmentId: string;
     threadId: string;
@@ -432,10 +474,25 @@ export class RuntimeManager {
       (entry) => !keptEntries.includes(entry),
     );
 
-    const stopResults = await Promise.all(
-      releasedEntries.map((entry) =>
-        entry.runtime.stopThread({ threadId: args.threadId }),
+    const { providerCheckpointId } = await this.stopThreadOwnerEntries(
+      releasedEntries,
+      args.threadId,
+    );
+    return {
+      activeTurnEnvironmentIds: keptEntries.map((entry) => entry.environmentId),
+      providerCheckpointId,
+      releasedEnvironmentIds: releasedEntries.map(
+        (entry) => entry.environmentId,
       ),
+    };
+  }
+
+  private async stopThreadOwnerEntries(
+    entries: RuntimeEntry[],
+    threadId: string,
+  ): Promise<{ providerCheckpointId: string | null }> {
+    const stopResults = await Promise.all(
+      entries.map((entry) => entry.runtime.stopThread({ threadId })),
     );
     const providerCheckpointIds = new Set(
       stopResults.flatMap((result) =>
@@ -445,14 +502,10 @@ export class RuntimeManager {
       ),
     );
     return {
-      activeTurnEnvironmentIds: keptEntries.map((entry) => entry.environmentId),
       providerCheckpointId:
         providerCheckpointIds.size === 1
           ? (providerCheckpointIds.values().next().value ?? null)
           : null,
-      releasedEnvironmentIds: releasedEntries.map(
-        (entry) => entry.environmentId,
-      ),
     };
   }
 

@@ -11,7 +11,8 @@ import {
   isThreadQueueAutoSendPaused,
   releaseQueuedMessageClaim,
   releaseStaleQueuedMessageClaims,
-  type DbQueryConnection,
+  type DbConnection,
+  type DbTransaction,
   type QueuedThreadMessageGroupClaimPolicy,
   type QueuedThreadMessageGroupEligibility,
 } from "@bb/db";
@@ -67,6 +68,9 @@ import { hasMessageDispatchHooks } from "./dispatch-hooks.js";
 import { attemptDispatch } from "./dispatch-attempt.js";
 import { deliverParentSystemMessage } from "./parent-system-messages.js";
 import { settleQueueRowDispatched } from "./queue-waits.js";
+import { requireNoThreadConfigurationTransition } from "./thread-lifecycle.js";
+import { requirePreparedThreadConfiguration } from "./thread-provider-configuration.js";
+import { requireUnexpiredDispatchReservation } from "./thread-reservations.js";
 import { recordQueuedMessageDrainFailure } from "./queue-drain-failure.js";
 import {
   ensureThreadIsWritable,
@@ -176,10 +180,13 @@ export interface CreateQueuedMessageForThreadArgs {
 }
 
 function admitQueuedMessage(
-  db: DbQueryConnection,
+  db: DbConnection | DbTransaction,
   thread: Thread,
 ): { providerThreadId: string | null } {
   ensureThreadIsWritable(thread);
+  requireNoThreadConfigurationTransition(thread.id);
+  requirePreparedThreadConfiguration(db, thread.id);
+  requireUnexpiredDispatchReservation(db, thread.id);
   const providerThreadId = getLastProviderThreadId({ db }, thread.id);
   if (thread.environmentId === null) {
     if (providerThreadId !== null) {

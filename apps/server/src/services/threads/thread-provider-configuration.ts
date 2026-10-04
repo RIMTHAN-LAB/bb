@@ -16,6 +16,11 @@ import {
 } from "@bb/domain";
 import { ApiError } from "../../errors.js";
 import type { ProviderRegistryService } from "../providers/provider-registry.js";
+import {
+  readThreadAdoptionReservation,
+  requireThreadAdoptionAttempt,
+  requireThreadAdoptionDispatchReady,
+} from "./thread-reservations.js";
 
 type Connection = DbConnection | DbTransaction;
 
@@ -50,7 +55,11 @@ export function readThreadConfigurationDelivery(
 export function setThreadProviderConfiguration(
   deps: { db: DbConnection; providerRegistry: ProviderRegistryService },
   threadId: string,
-  patch: { nativeContext?: NativeContext; configurationGeneration?: number },
+  patch: {
+    nativeContext?: NativeContext;
+    configurationGeneration?: number;
+    adoptionAttemptId?: string;
+  },
 ): void {
   deps.db.transaction(
     (tx) => {
@@ -68,6 +77,42 @@ export function setThreadProviderConfiguration(
           "Provider configuration requires a pending or idle thread",
         );
       const previous = readThreadProviderConfiguration(tx, threadId);
+      const adoption = requireThreadAdoptionAttempt(
+        tx,
+        threadId,
+        patch.adoptionAttemptId,
+      );
+      if (
+        adoption !== null &&
+        readThreadConfigurationDelivery(tx, threadId) !== null
+      )
+        throw new ApiError(
+          409,
+          "configuration_adoption_managed",
+          "A prepared adoption requires normal managed release before configuration changes",
+        );
+      if (
+        adoption !== null &&
+        previous?.nativeContext === undefined &&
+        patch.nativeContext === undefined
+      )
+        throw new ApiError(
+          409,
+          "configuration_adoption_native_context_required",
+          "Initial adoption must bind its exact native home with the configuration generation",
+        );
+      if (
+        adoption !== null &&
+        (patch.configurationGeneration === undefined ||
+          (adoption.releasedConfiguration.generation !== null &&
+            patch.configurationGeneration <=
+              adoption.releasedConfiguration.generation))
+      )
+        throw new ApiError(
+          409,
+          "configuration_generation_stale",
+          "Adoption requires a new exact configuration generation",
+        );
       if (patch.nativeContext !== undefined) {
         if (
           deps.providerRegistry.get(thread.providerId)
@@ -100,7 +145,8 @@ export function setThreadProviderConfiguration(
           );
         if (
           previous?.nativeContext === undefined &&
-          thread.status !== "pending"
+          thread.status !== "pending" &&
+          adoption === null
         )
           throw new ApiError(
             409,
@@ -161,6 +207,19 @@ export function recordThreadConfigurationDelivery(
   )
     return;
   const desired = readThreadProviderConfiguration(db, parsed.threadId);
+  const adoption = readThreadAdoptionReservation(db, parsed.threadId);
+  if (
+    adoption !== null &&
+    (adoption.state !== "reserved" ||
+      adoption.expiresAt <= Date.now() ||
+      parsed.providerSessionId !== adoption.providerSessionId ||
+      parsed.providerInstanceId === undefined ||
+      parsed.deliveredAt <= adoption.stoppedAt ||
+      parsed.deliveredAt > adoption.expiresAt ||
+      (adoption.releasedConfiguration.generation !== null &&
+        parsed.generation <= adoption.releasedConfiguration.generation))
+  )
+    return;
   if (
     desired === null ||
     desired.generation !== parsed.generation ||
@@ -223,6 +282,7 @@ export function requirePreparedThreadConfiguration(
   db: Connection,
   threadId: string,
 ): void {
+  requireThreadAdoptionDispatchReady(db, threadId);
   if (readThreadProviderConfiguration(db, threadId)?.release !== undefined)
     throw new ApiError(
       409,

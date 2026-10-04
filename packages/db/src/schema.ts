@@ -649,6 +649,7 @@ export const threadDispatchReservations = sqliteTable(
       .primaryKey()
       .references(() => threads.id, { onDelete: "cascade" }),
     expiresAt: integer("expires_at").notNull(),
+    adoption: text("adoption"),
   },
   (table) => [
     index("thread_dispatch_reservations_expiry_idx").on(table.expiresAt),

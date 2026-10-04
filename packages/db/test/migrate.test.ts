@@ -6088,6 +6088,70 @@ describe("machine providers migration", () => {
   });
 });
 
+describe("configuration adoption reservation migration", () => {
+  it("preserves legacy conversation and deferred lease rows across adoption-column upgrade and repeated boot", () => {
+    const db = createMigratedConnection();
+    try {
+      const host = upsertHost(db, noopNotifier, {
+        id: "host-legacy-adoption-migration",
+        name: "Legacy migration host",
+      });
+      const { project } = createProject(db, noopNotifier, {
+        name: "Legacy adoption migration",
+        source: {
+          type: "local_path",
+          hostId: host.id,
+          path: "/tmp/legacy-adoption-migration",
+        },
+      });
+      const legacy = createThread(db, noopNotifier, {
+        projectId: project.id,
+        providerId: "codex",
+        status: "idle",
+      });
+      const deferred = createThread(db, noopNotifier, {
+        projectId: project.id,
+        providerId: "codex",
+        status: "pending",
+      });
+      db.$client
+        .prepare(
+          "INSERT INTO thread_dispatch_reservations(thread_id, expires_at) VALUES (?, ?)",
+        )
+        .run(deferred.id, 123456789);
+      db.$client.exec(
+        "ALTER TABLE thread_dispatch_reservations DROP COLUMN adoption",
+      );
+      db.$client
+        .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
+        .run(latestMigrationWhen);
+      migrate(db);
+      migrate(db);
+      expect(
+        db.$client
+          .prepare(
+            "SELECT thread_id AS threadId, expires_at AS expiresAt, adoption FROM thread_dispatch_reservations",
+          )
+          .all(),
+      ).toEqual([
+        { threadId: deferred.id, expiresAt: 123456789, adoption: null },
+      ]);
+      expect(
+        db.$client
+          .prepare(
+            "SELECT id, status, archived_at AS archivedAt FROM threads WHERE id IN (?, ?) ORDER BY status",
+          )
+          .all(legacy.id, deferred.id),
+      ).toEqual([
+        { id: legacy.id, status: "idle", archivedAt: null },
+        { id: deferred.id, status: "pending", archivedAt: null },
+      ]);
+    } finally {
+      closeConnection(db);
+    }
+  });
+});
+
 describe("environment and thread startup ownership migration", () => {
   it.each(["creating", "cancelled"])(
     "preserves %s allocation checkpoints and keeps attached environment resources authoritative",

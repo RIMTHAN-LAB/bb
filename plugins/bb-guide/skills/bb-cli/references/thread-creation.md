@@ -241,3 +241,28 @@ Hermes native profiles use `--native-home` plus optional protected-file pairs
 inside the immutable home on the execution host. MCP is limited to64KiB and
 native instructions to1MiB. The API exposes only paths/hashes. HTTP/SSE require
 actual ACP negotiation. SDK callers use the same `nativeContext` object.
+
+## Adopt a retained unmanaged conversation
+
+Read `bb thread show ID --json`: `providerSessionId` is the actual native pointer,
+not a delivery receipt. For an idle unmanaged thread, use
+`bb thread release-configuration ID --generation null --expected-provider-session NATIVE --json`.
+The server waits for an exact host stop and exposes a five-minute
+`dispatchReservation` with purpose `configuration-adoption`, `attemptId`, retained
+`providerSessionId`, `stoppedAt`, `expiresAt` and `state` (`reserved`, `failed`, `expired`).
+No model turn is sent. PATCH with
+`bb thread update ID --configuration-generation N --native-context-json '<json>' --adoption-attempt ATTEMPT --json`,
+then `bb thread prepare ID --generation N --adoption-attempt ATTEMPT --json`.
+The immutable native home and original session remain authoritative; preparation
+does not consume the reservation or prove required application by itself.
+
+Failed/expired adoption without real managed delivery can explicitly recover:
+`bb thread release-configuration ID --generation N_OR_NULL --expected-provider-session NATIVE --recover-adoption ATTEMPT --expected-native-context-json '<observed-json-or-null>' --json`.
+Before PATCH, generation and context must both be null; after PATCH they must
+match actual stored state. Live replay preserves the same deadline. A new recovery
+requires another successful exact stop; stale observations receive 409 without
+mutation. Expiry keeps the retained conversation and blocks dispatch. Once a real
+exact managed delivery exists, use ordinary numeric release instead. Managed
+updates expose `--release-provider-session` for the existing advanced-generation
+path. SDK callers use the same strict `threads.releaseConfiguration` union and
+`adoptionAttemptId` on `threads.update`/`prepareConfiguration`.

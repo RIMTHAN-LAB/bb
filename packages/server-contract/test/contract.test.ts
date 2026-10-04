@@ -218,13 +218,18 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
-      "Thread PATCH omission preserves stored nativeContext and configurationGeneration; a supplied replacement nativeContext omits instructionsConfig or mcpConfig when no protected file of that kind is selected. releaseProviderSession is explicit authorization required to advance an existing session's configuration, and is omitted for initial, unchanged or ordinary metadata updates; it is not a standalone release request.",
+      "Thread PATCH omission preserves stored nativeContext and configurationGeneration; supplied native context, including adoption recovery's exact observed context, omits protected references when that file is absent. releaseProviderSession authorizes an idle managed advance, not a standalone release. adoptionAttemptId is absent for ordinary managed/new-thread requests and required by the live adoption owner for PATCH/prepare. Preparation timeout omission selects the server's bounded default.",
     fields: [
       "updateThreadRequestSchema.nativeContext",
       "updateThreadRequestSchema.nativeContext.instructionsConfig",
       "updateThreadRequestSchema.nativeContext.mcpConfig",
       "updateThreadRequestSchema.configurationGeneration",
       "updateThreadRequestSchema.releaseProviderSession",
+      "updateThreadRequestSchema.adoptionAttemptId",
+      "prepareThreadConfigurationRequestSchema.adoptionAttemptId",
+      "prepareThreadConfigurationRequestSchema.timeoutMs",
+      "releaseThreadConfigurationRequestSchema.recoverAdoption.expectedNativeContext.instructionsConfig",
+      "releaseThreadConfigurationRequestSchema.recoverAdoption.expectedNativeContext.mcpConfig",
     ],
   },
   {
@@ -1930,6 +1935,10 @@ describe("server-contract clients", () => {
       updateProjectSourceRequestSchema:
         contract.updateProjectSourceRequestSchema,
       updateThreadRequestSchema: contract.updateThreadRequestSchema,
+      prepareThreadConfigurationRequestSchema:
+        contract.prepareThreadConfigurationRequestSchema,
+      releaseThreadConfigurationRequestSchema:
+        contract.releaseThreadConfigurationRequestSchema,
       uploadedPromptAttachmentSchema: contract.uploadedPromptAttachmentSchema,
     });
     const groupedFieldCount = OPTIONAL_SERVER_FIELD_GROUPS.reduce(

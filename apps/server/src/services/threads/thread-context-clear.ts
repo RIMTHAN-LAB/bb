@@ -9,7 +9,11 @@ import { ApiError } from "../../errors.js";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { withThreadContextClearGuard } from "./thread-context-mutation-guard.js";
 import { appendThreadEvent } from "./thread-events.js";
-import { stopThreadForCurrentState } from "./thread-lifecycle.js";
+import {
+  stopThreadForCurrentState,
+  requireNoThreadConfigurationTransition,
+} from "./thread-lifecycle.js";
+import { requireThreadAdoptionContextWritable } from "./thread-reservations.js";
 import { buildThreadStatusChangeMetadata } from "./thread-runtime-display.js";
 import { requestQueuedMessageDispatch } from "./queued-message-dispatch.js";
 
@@ -21,6 +25,8 @@ export async function clearThreadContext(
   },
 ): Promise<void> {
   await withThreadContextClearGuard(args.thread.id, async () => {
+    requireNoThreadConfigurationTransition(args.thread.id);
+    requireThreadAdoptionContextWritable(deps.db, args.thread.id);
     const thread = getThread(deps.db, args.thread.id);
     if (!thread) {
       throw new ApiError(404, "invalid_request", "Thread not found");
@@ -44,6 +50,8 @@ export async function clearThreadContext(
     }
 
     await stopThreadForCurrentState(deps, thread, args.environment);
+    requireNoThreadConfigurationTransition(thread.id);
+    requireThreadAdoptionContextWritable(deps.db, thread.id);
     const releasedThread = getThread(deps.db, thread.id);
     if (
       !releasedThread ||

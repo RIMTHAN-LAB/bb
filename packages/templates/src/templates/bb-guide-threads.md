@@ -412,7 +412,7 @@ Mutating thread lifecycle and messaging commands require an explicit ID or --sel
 
 Managed provider preparation:
 
-  bb thread prepare <thread-id> --generation <n> [--timeout-ms <1..60000>] --json
+  bb thread prepare <thread-id> --generation <n> [--timeout-ms <1..60000>] [--adoption-attempt <id>] --json
   bb thread release-configuration <thread-id> --generation <current-n> --json
 
   Preparation creates or restores a provider session without a model prompt.
@@ -429,3 +429,29 @@ Managed provider preparation:
   acknowledges it. SDK: threads.releaseConfiguration / prepareConfiguration / update.
   PATCH protected references with configurationGeneration and releaseProviderSession:true;
   the existing native home cannot change. Active prompts are refused.
+
+Retained unmanaged conversation adoption:
+
+  bb thread show <thread-id> --json
+  bb thread release-configuration <thread-id> --generation null --expected-provider-session <native-id> --json
+  bb thread update <thread-id> --configuration-generation <n> --native-context-json '<home-and-path/hash-refs>' --adoption-attempt <attempt-id> --json
+  bb thread prepare <thread-id> --generation <n> --adoption-attempt <attempt-id> --json
+
+  GET's providerSessionId is the actual retained native pointer, string or null;
+  it is not configuration delivery evidence. Initial release requires unmanaged
+  idle state and an exact acknowledged stop, without input or a model turn. GET
+  exposes dispatchReservation.purpose:"configuration-adoption", attemptId,
+  providerSessionId, stoppedAt, expiresAt and state:reserved|failed|expired.
+  PATCH and prepare must name that exact attempt and retain the native session.
+  They leave the dispatch fence intact until the first qualified ordinary input.
+
+  For a failed/expired attempt without real managed delivery, explicit recovery is:
+  bb thread release-configuration <thread-id> --generation <current-n|null> --expected-provider-session <native-id> --recover-adoption <attempt-id> --expected-native-context-json '<observed-context-or-null>' --json
+  Generation/context must both be null before PATCH, or both match stored state
+  afterwards. Live replay never renews the five-minute lease. A genuinely new
+  recovery repeats stop and issues one fresh finite attempt; stale observations
+  return 409 without changing the winning attempt. Expiry retains the conversation
+  and its fence. Once real exact managed delivery exists, use numeric managed
+  release instead. Delivery alone still does not establish required application.
+  SDK uses the same strict release union and adoptionAttemptId on update/prepare.
+  Managed updates may use --release-provider-session with an advanced generation.

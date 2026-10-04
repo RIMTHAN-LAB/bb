@@ -1,0 +1,1 @@
+ALTER TABLE `thread_dispatch_reservations` ADD `adoption` text;
