@@ -736,6 +736,12 @@ function dropMarketplaceStatsColumn(db: DbConnection): void {
  * 0108's, so the replay recreates the table before 0110 drops it again.
  */
 function rewindEnvironmentProvisioningMigration(db: DbConnection): void {
+  for (const table of [
+    "thread_provider_configurations",
+    "thread_dispatch_reservations",
+  ]) {
+    db.$client.prepare(`DROP TABLE IF EXISTS ${table}`).run();
+  }
   const columns = db.$client
     .prepare<[], TableInfoRow>("PRAGMA table_info(environments)")
     .all();

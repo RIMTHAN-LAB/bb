@@ -13,6 +13,11 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  collectProcessOutput,
+  createManagedProcesses,
+  waitForProcessExit,
+} from "./smoke-processes.mjs";
 
 const HTTP_WAIT_TIMEOUT_MS = 60_000;
 const HTTP_WAIT_INTERVAL_MS = 250;
@@ -48,7 +53,6 @@ const EXPECTED_RUNNING_BUILTIN_PLUGINS = [
 // against a packed tarball.
 const PROVIDER_BRIDGE_PROTOCOL_VERSION = 2;
 const BRIDGE_WAIT_TIMEOUT_MS = 10_000;
-const PROCESS_STOP_TIMEOUT_MS = 5_000;
 const PORT_COLLISION_MAX_ATTEMPTS = 3;
 const DEFAULT_HOST_DAEMON_LOCAL_BIND_HOST = "127.0.0.1";
 const PORT_COLLISION_PATTERN =
@@ -60,6 +64,8 @@ const tempRoot = await mkdtemp(join(tmpdir(), "bb-app-tarball-"));
 const smokeProcessEnv = {
   BB_TELEMETRY: "false",
 };
+const { spawnManagedProcess, stopManagedProcess, cleanupTemporaryRoot } =
+  createManagedProcesses({ cwd: tempRoot, env: smokeProcessEnv });
 
 function formatElapsed(startedAt) {
   return `${((performance.now() - startedAt) / 1000).toFixed(1)}s`;
@@ -93,30 +99,8 @@ function formatProcessOutput(output) {
   return sections.join("\n\n");
 }
 
-function collectProcessOutput(childProcess) {
-  const output = {
-    stderr: "",
-    stdout: "",
-  };
-  childProcess.stdout?.on("data", (chunk) => {
-    output.stdout += chunk.toString("utf8");
-  });
-  childProcess.stderr?.on("data", (chunk) => {
-    output.stderr += chunk.toString("utf8");
-  });
-  return output;
-}
-
 function isRecord(value) {
   return typeof value === "object" && value !== null;
-}
-
-function waitForProcessExit(childProcess) {
-  return new Promise((resolvePromise) => {
-    childProcess.once("exit", (code, signal) => {
-      resolvePromise({ code, signal });
-    });
-  });
 }
 
 async function runCommand({ args, command, cwd = tempRoot, env = {}, label }) {
@@ -137,27 +121,6 @@ async function runCommand({ args, command, cwd = tempRoot, env = {}, label }) {
     );
   }
   return output.stdout;
-}
-
-function spawnManagedProcess({ args, command, env = {}, label }) {
-  const detached = process.platform !== "win32";
-  const childProcess = spawn(command, args, {
-    cwd: tempRoot,
-    detached,
-    env: {
-      ...process.env,
-      ...env,
-      ...smokeProcessEnv,
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const output = collectProcessOutput(childProcess);
-  return {
-    childProcess,
-    detached,
-    label,
-    output,
-  };
 }
 
 class PortCollisionError extends Error {}
@@ -347,42 +310,6 @@ async function waitForHostPluginWorker({ dataDir, pluginId, processRef }) {
   throw new Error(
     `Timed out waiting for host plugin ${pluginId} on ${processRef.label}\n${formatProcessOutput(processRef.output)}\n${logPath}:\n${daemonOutput}`,
   );
-}
-
-async function stopManagedProcess(processRef) {
-  if (processRef.detached) {
-    try {
-      process.kill(-processRef.childProcess.pid, "SIGINT");
-    } catch (error) {
-      if (
-        !(error instanceof Error && "code" in error && error.code === "ESRCH")
-      ) {
-        throw error;
-      }
-    }
-  }
-
-  if (
-    processRef.childProcess.exitCode !== null ||
-    processRef.childProcess.signalCode !== null
-  ) {
-    return;
-  }
-  if (!processRef.detached) {
-    processRef.childProcess.kill("SIGINT");
-  }
-  const stopped = await Promise.race([
-    waitForProcessExit(processRef.childProcess).then(() => true),
-    delay(PROCESS_STOP_TIMEOUT_MS).then(() => false),
-  ]);
-  if (!stopped) {
-    if (processRef.detached) {
-      process.kill(-processRef.childProcess.pid, "SIGTERM");
-    } else {
-      processRef.childProcess.kill("SIGTERM");
-    }
-    await waitForProcessExit(processRef.childProcess);
-  }
 }
 
 function createInstalledBinInvocation(binDir, bin, args) {
@@ -1281,5 +1208,5 @@ try {
     `bb-app tarball smoke passed in ${formatElapsed(smokeStartedAt)}\n`,
   );
 } finally {
-  await rm(tempRoot, { force: true, recursive: true });
+  await cleanupTemporaryRoot();
 }

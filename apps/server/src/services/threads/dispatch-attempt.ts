@@ -347,6 +347,22 @@ async function runDispatchAttempt(
     targetThread: thread,
   });
 
+  const startupThread = getThread(deps.db, thread.id);
+  if (startupThread === null) {
+    throw new ApiError(404, "thread_not_found", "Thread not found");
+  }
+  if (
+    startupThread.status !== thread.status ||
+    startupThread.archivedAt !== thread.archivedAt ||
+    startupThread.deletedAt !== thread.deletedAt
+  ) {
+    return reattemptDispatchForThreadChange(
+      deps,
+      args,
+      startupThread,
+      reattempted,
+    );
+  }
   const interruptedStartupRequest =
     (thread.status === "error" || thread.status === "idle") &&
     thread.environmentId === null
@@ -751,7 +767,7 @@ async function admitPendingThread(
       (tx) => {
         requireNoThreadConfigurationTransition(args.thread.id);
         requirePreparedThreadConfiguration(deps.db, args.thread.id);
-        if (getThread(tx, args.thread.id)?.status !== "pending") {
+        if (getThread(tx, args.thread.id)?.status !== args.thread.status) {
           throw new PendingThreadAdmissionLost();
         }
         requireUnexpiredThreadReservation(startContext);

@@ -422,7 +422,10 @@ async function advanceThreadProvisioningOnce(
       thread: failureThread,
       environmentId: context.state.environmentId ?? failureThread.environmentId,
       detail,
-      ...(error instanceof ApiError ? { code: error.body.code } : {}),
+      ...(error instanceof ApiError &&
+      error.body.code === "agent_configuration_refused"
+        ? { code: error.body.code }
+        : {}),
     });
   }
 }

@@ -315,6 +315,11 @@ describe("deferred first dispatch", () => {
       expect(refused.status, await refused.clone().text()).toBe(409);
       expect(await refused.text()).toContain("agent_configuration_refused");
       expect(
+        listEvents(harness.db, { threadId: thread.id })
+          .filter((event) => event.type === "system/error")
+          .map((event) => JSON.parse(event.data).code),
+      ).toContain("agent_configuration_refused");
+      expect(
         listQueuedThreadCommands(harness, "thread.start", thread.id),
       ).toEqual([]);
       expect(
