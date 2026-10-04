@@ -314,6 +314,54 @@ function createProvisionWorkspaceMock(path: string) {
 }
 
 describe("RuntimeManager", () => {
+  it("retains unmanaged staged rewind lookup without selecting a managed sibling", async () => {
+    const manager = new RuntimeManager({
+      createRuntime: () => createFakeRuntime(),
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/lookup-workspace"),
+    });
+    const common = {
+      environmentId: "lookup-env",
+      workspacePath: "/tmp/lookup-workspace",
+    };
+    try {
+      const first = await manager.ensureEnvironment({
+        ...common,
+        targetThreadId: "managed-first",
+        configurationGeneration: 1,
+      });
+      const second = await manager.ensureEnvironment({
+        ...common,
+        targetThreadId: "managed-second",
+        configurationGeneration: 2,
+      });
+      expect(manager.getForThread(common.environmentId, "managed-first")).toBe(
+        first,
+      );
+      expect(manager.getForThread(common.environmentId, "managed-second")).toBe(
+        second,
+      );
+      expect(
+        manager.getForThread(common.environmentId, "unmanaged-rewind"),
+      ).toBeUndefined();
+      const legacy = await manager.ensureEnvironment(common);
+      expect(legacy.runtime.hasThread("unmanaged-rewind")).toBe(false);
+      expect(
+        manager.getForThread(common.environmentId, "unmanaged-rewind"),
+      ).toBe(legacy);
+      expect(manager.getForThread(common.environmentId, "managed-first")).toBe(
+        first,
+      );
+      expect(manager.getForThread(common.environmentId, "managed-second")).toBe(
+        second,
+      );
+      expect(
+        manager.getForThread("other-environment", "managed-first"),
+      ).toBeUndefined();
+    } finally {
+      await manager.shutdownAll();
+    }
+  });
+
   it("creates a runtime the first time an environment is requested", async () => {
     const provisionWorkspace = createProvisionWorkspaceMock("/tmp/env-1");
     const createRuntime = vi.fn(() => createFakeRuntime());

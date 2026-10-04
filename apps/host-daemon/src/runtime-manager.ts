@@ -338,12 +338,15 @@ export class RuntimeManager {
     environmentId: string,
     threadId: string,
   ): RuntimeEntry | undefined {
-    return [...this.entries.values()].find(
+    const exact = [...this.entries.values()].find(
       (entry) =>
         entry.environmentId === environmentId &&
         (entry.runtimeThreadId === threadId ||
           entry.runtime.hasThread(threadId)),
     );
+    if (exact) return exact;
+    const legacy = this.entries.get(environmentId);
+    return legacy?.configurationGeneration === undefined ? legacy : undefined;
   }
 
   async getOrAwait(environmentId: string): Promise<RuntimeEntry | undefined> {
