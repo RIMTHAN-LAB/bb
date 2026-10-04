@@ -4,6 +4,7 @@ import {
   getEnvironment,
   getProjectSourceByHost,
   getThread,
+  threadDispatchReservations,
 } from "@bb/db";
 import type {
   ProjectExecutionDefaults,
@@ -42,6 +43,8 @@ import {
   getThreadSafe,
   requirePublicProjectForThreadCreate,
 } from "./thread-create-helpers.js";
+import { THREAD_RESERVATION_TTL_MS } from "./thread-reservations.js";
+import { setThreadProviderConfiguration } from "./thread-provider-configuration.js";
 import {
   resolveStableThreadRequestEnvironment,
   type ResolvedStableThreadRequestEnvironment,
@@ -362,6 +365,12 @@ async function createPendingThreadAndAttemptFirstDispatch(
   let execution: Awaited<ReturnType<typeof buildExecutionOptions>>;
   try {
     if (
+      args.request.nativeContext !== undefined ||
+      args.request.configurationGeneration !== undefined
+    ) {
+      setThreadProviderConfiguration(deps, thread.id, args.request);
+    }
+    if (
       args.fork !== null &&
       args.fork.historyEndSequence !== null &&
       args.request.visibility === "visible"
@@ -391,35 +400,50 @@ async function createPendingThreadAndAttemptFirstDispatch(
         : {}),
       startedOnBehalfOf: args.request.startedOnBehalfOf,
       titleProvided: Boolean(args.request.title),
+      ...(args.request.dispatch === "deferred"
+        ? {
+            reservationExpiresAt: Date.now() + THREAD_RESERVATION_TTL_MS,
+            reservationExecution: execution,
+          }
+        : {}),
     };
+    if (startContext.reservationExpiresAt !== undefined)
+      deps.db
+        .insert(threadDispatchReservations)
+        .values({
+          threadId: thread.id,
+          expiresAt: startContext.reservationExpiresAt,
+        })
+        .run();
     setThreadStartupContext(deps.db, {
       threadId: thread.id,
       startupContext: JSON.stringify({ kind: "pending", ...startContext }),
     });
 
-    await attemptDispatch(deps, {
-      thread,
-      payload: {
-        input: args.request.input,
-        mode: "start",
-        model: execution.model,
-        reasoningLevel: execution.reasoningLevel,
-        serviceTier: execution.serviceTier,
-        permissionMode: execution.permissionMode,
-        ...(args.request.executionInputSources !== undefined
-          ? { executionInputSources: args.request.executionInputSources }
-          : {}),
-        ...(args.sendAt !== undefined ? { sendAt: args.sendAt } : {}),
-      },
-      source: { kind: "inline" },
-      queuePayload: { kind: "inline" },
-      startContext,
-      executionDefaults: executionPlanArgs,
-      origin: args.request.origin,
-      originPluginId: args.request.originPluginId ?? null,
-      startedOnBehalfOf: args.request.startedOnBehalfOf,
-      trigger: "user",
-    });
+    if (args.request.dispatch === "immediate")
+      await attemptDispatch(deps, {
+        thread,
+        payload: {
+          input: args.request.input,
+          mode: "start",
+          model: execution.model,
+          reasoningLevel: execution.reasoningLevel,
+          serviceTier: execution.serviceTier,
+          permissionMode: execution.permissionMode,
+          ...(args.request.executionInputSources !== undefined
+            ? { executionInputSources: args.request.executionInputSources }
+            : {}),
+          ...(args.sendAt !== undefined ? { sendAt: args.sendAt } : {}),
+        },
+        source: { kind: "inline" },
+        queuePayload: { kind: "inline" },
+        startContext,
+        executionDefaults: executionPlanArgs,
+        origin: args.request.origin,
+        originPluginId: args.request.originPluginId ?? null,
+        startedOnBehalfOf: args.request.startedOnBehalfOf,
+        trigger: "user",
+      });
   } catch (error) {
     emitPluginThreadDeleted({
       ...thread,
@@ -462,6 +486,19 @@ export async function createThreadFromRequest(
     deps,
     rawRequestInput.projectId,
   );
+  const dispatch = rawRequestInput.dispatch ?? "immediate";
+  if (
+    dispatch === "deferred" &&
+    (rawRequestInput.input.length > 0 ||
+      rawRequestInput.sendAt !== undefined ||
+      options.providerInput !== undefined)
+  ) {
+    throw new ApiError(
+      400,
+      "invalid_request",
+      "deferred dispatch requires empty input and no sendAt or providerInput",
+    );
+  }
   if (rawRequestInput.origin === "plugin") {
     if (rawRequestInput.originPluginId === undefined) {
       throw new ApiError(
@@ -610,6 +647,7 @@ export async function createThreadFromRequest(
   }
   const request: ThreadCreateServiceRequest = {
     ...requestRest,
+    dispatch,
     ...(hierarchyParentThreadId
       ? { parentThreadId: hierarchyParentThreadId }
       : {}),

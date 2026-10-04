@@ -98,6 +98,7 @@ export function makeThreadResponse(
     projectId: "project-1",
     environmentId: null,
     providerId: "test-provider",
+    providerSessionId: null,
     title: null,
     titleFallback: null,
     sectionId: null,

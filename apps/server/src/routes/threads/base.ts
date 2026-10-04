@@ -59,6 +59,11 @@ import { assertValidParentThread } from "../../services/threads/thread-parent.js
 import { handleThreadOwnershipChange } from "../../services/threads/thread-ownership.js";
 import { applyThreadExecutionOverride } from "../../services/threads/thread-execution-override.js";
 import { emitPluginThreadDeleted } from "../../services/plugins/plugin-thread-events.js";
+import {
+  prepareThreadConfiguration,
+  releaseThreadConfiguration,
+  updateThreadProviderConfiguration,
+} from "../../services/threads/thread-configuration-prepare.js";
 
 function parseThreadIncludes(query: ThreadGetQuery): Set<ThreadIncludeOption> {
   const includes = new Set<ThreadIncludeOption>();
@@ -383,8 +388,34 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
     return context.json(getThreadChildSummary(thread.id));
   });
 
+  post(routes.releaseConfiguration, async (context, payload) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    await releaseThreadConfiguration(deps, thread.id, payload);
+    return context.json(
+      toThreadResponseFromThread(deps, {
+        thread: requirePublicThread(deps.db, thread.id),
+      }),
+    );
+  });
+
+  post(routes.prepareConfiguration, async (context, payload) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    await prepareThreadConfiguration(deps, thread.id, payload);
+    return context.json(
+      toThreadResponseFromThread(deps, {
+        thread: requirePublicThread(deps.db, thread.id),
+      }),
+    );
+  });
+
   patch(routes.update, async (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
+    if (
+      payload.nativeContext !== undefined ||
+      payload.configurationGeneration !== undefined
+    ) {
+      await updateThreadProviderConfiguration(deps, thread.id, payload);
+    }
     if (payload.parentThreadId) {
       assertValidParentThread(deps, {
         childThreadId: thread.id,

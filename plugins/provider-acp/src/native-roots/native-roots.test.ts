@@ -240,6 +240,22 @@ describe("omp", () => {
 });
 
 describe("hermes", () => {
+  it("keeps selected managed roots in the plugin layer after native user roots", async () => {
+    await writeFileEnsuringDir(
+      home("profile-a", "config.yaml"),
+      "skills:\n  external_dirs: [learned-extra]\n  plugin_dirs: [.factory-managed/pack]\n",
+    );
+    const roots = await resolveSkills(
+      resolveHermesNativeRoots,
+      argsFor({ HERMES_HOME: "profile-a" }),
+    );
+    expect(roots.map((root) => [root.origin, root.path])).toEqual([
+      ["user", home("profile-a", "skills")],
+      ["user", home("profile-a", "learned-extra")],
+      ["plugin", home("profile-a", ".factory-managed", "pack")],
+    ]);
+  });
+
   it("scans the hermes skills tree and the configured external directories", async () => {
     await writeFileEnsuringDir(
       home(".hermes", "config.yaml"),

@@ -626,6 +626,22 @@ export function registerPluginRoutes(
     return context.json(source);
   });
 
+  app.get("/plugins/:id/configuration-package", async (context) => {
+    const problem = localAuthProblem(context, deps);
+    if (problem) return context.json({ error: problem.error }, problem.status);
+    const version = context.req.query("version") ?? "";
+    const kind = context.req.query("kind");
+    const digest = context.req.query("digest");
+    if (kind !== "skill" && kind !== "mcp") return context.json({ error: "kind must be skill or mcp" }, 400);
+    try {
+      const exported = await plugins.getConfigurationPackage({ pluginId: context.req.param("id"), version, kind, ...(digest === undefined ? {} : { digest }) });
+      if (digest === undefined) return context.json({ package: exported.info });
+      return context.body(new Uint8Array(exported.bytes), 200, { "content-type": "application/x-tar", "content-length": String(exported.bytes.length), "x-content-sha256": exported.info.digest, "cache-control": "private, immutable" });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : "exact configuration package unavailable" }, 422);
+    }
+  });
+
   app.post("/plugins/reload", async (context) => {
     const id = context.req.query("id") ?? undefined;
     const outcome = await plugins.reload(id);

@@ -1,3 +1,4 @@
+import { ApiError } from "../../errors.js";
 import { getNonDestroyedHostByLaunchKey } from "@bb/db";
 import { sweepProviderMachine } from "../machines/provider-orchestration.js";
 import { readThreadProvisioningStage } from "./thread-provisioning-context.js";
@@ -421,6 +422,10 @@ async function advanceThreadProvisioningOnce(
       thread: failureThread,
       environmentId: context.state.environmentId ?? failureThread.environmentId,
       detail,
+      ...(error instanceof ApiError &&
+      error.body.code === "agent_configuration_refused"
+        ? { code: error.body.code }
+        : {}),
     });
   }
 }

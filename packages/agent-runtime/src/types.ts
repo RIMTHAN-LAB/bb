@@ -14,6 +14,7 @@ import type {
   ThreadEvent,
   ToolCallRequest,
   ToolCallResponse,
+  ProviderConfigurationReadback,
 } from "@bb/domain";
 import type {
   ProviderHealthResult,
@@ -137,6 +138,8 @@ export interface StartThreadArgs {
 
 export interface StartThreadResult {
   providerThreadId: string;
+  providerReadback?: ProviderConfigurationReadback;
+  providerInstanceId?: string;
 }
 
 interface PrepareThreadRewindArgs {
@@ -181,6 +184,8 @@ export interface ResumeThreadArgs {
 
 export interface ResumeThreadResult {
   providerThreadId: string;
+  providerReadback?: ProviderConfigurationReadback;
+  providerInstanceId?: string;
 }
 
 export interface RunTurnArgs {

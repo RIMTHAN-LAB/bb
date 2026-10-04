@@ -10,6 +10,7 @@ import { registerShowCommand } from "./show.js";
 import { registerSpawnCommand } from "./spawn.js";
 import { registerForkCommand } from "./fork.js";
 import { registerWaitCommand } from "./wait.js";
+import { registerPrepareConfigurationCommand } from "./prepare.js";
 
 export function registerThreadCommands(
   program: Command,
@@ -18,6 +19,7 @@ export function registerThreadCommands(
   const thread = program.command("thread").description("Manage threads");
   registerWaitCommand(thread, getUrl);
   registerSpawnCommand(thread, getUrl);
+  registerPrepareConfigurationCommand(thread, getUrl);
   registerForkCommand(thread, getUrl);
   registerListCommand(thread, getUrl);
   registerCountCommand(thread, getUrl);

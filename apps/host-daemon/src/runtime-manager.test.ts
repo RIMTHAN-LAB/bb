@@ -314,6 +314,145 @@ function createProvisionWorkspaceMock(path: string) {
 }
 
 describe("RuntimeManager", () => {
+  it("refuses configuration release while the exact managed profile is being created", async () => {
+    const started = createDeferredPromise<void>();
+    const workspace = createDeferredPromise<HostWorkspace>();
+    const runtime = createFakeRuntime();
+    const manager = new RuntimeManager({
+      createRuntime: () => runtime,
+      provisionWorkspace: async () => {
+        started.resolve();
+        return workspace.promise;
+      },
+    });
+    const creating = manager.ensureEnvironment({
+      environmentId: "pending-env",
+      workspacePath: "/tmp/pending-profile",
+      configurationGeneration: 1,
+      targetThreadId: "target",
+      nativeContext: { homePath: "/profiles/target" },
+    });
+    await started.promise;
+    await expect(
+      manager.releaseThreadForConfiguration({
+        environmentId: "pending-env",
+        threadId: "target",
+      }),
+    ).rejects.toThrow("active or pending provider work");
+    expect(runtime.stopThread).not.toHaveBeenCalled();
+    await expect(
+      manager.releaseThreadForConfiguration({
+        environmentId: "pending-env",
+        threadId: "absent-sibling",
+      }),
+    ).resolves.toEqual({ providerCheckpointId: null });
+    workspace.resolve(createFakeWorkspace("/tmp/pending-profile"));
+    await creating;
+  });
+
+  it.each(["current-env", "old-env"])(
+    "refuses configuration release while a target command is in flight in %s",
+    async (environmentId) => {
+      const manager = new RuntimeManager({
+        createRuntime: () => createFakeRuntime(),
+        provisionWorkspace: createProvisionWorkspaceMock(
+          "/tmp/release-command",
+        ),
+      });
+      const finish = await manager.retainEnvironmentForThreadCommand(
+        environmentId,
+        "target",
+      );
+      try {
+        await expect(
+          manager.releaseThreadForConfiguration({
+            environmentId: "current-env",
+            threadId: "target",
+          }),
+        ).rejects.toThrow("active or pending provider work");
+      } finally {
+        finish();
+      }
+      await expect(
+        manager.releaseThreadForConfiguration({
+          environmentId: "current-env",
+          threadId: "target",
+        }),
+      ).resolves.toEqual({ providerCheckpointId: null });
+    },
+  );
+
+  it("refuses a pending target turn even before its runtime owns a provider session", async () => {
+    const runtime = createFakeRuntime();
+    const manager = new RuntimeManager({
+      createRuntime: () => runtime,
+      provisionWorkspace: createProvisionWorkspaceMock(
+        "/tmp/release-pending-turn",
+      ),
+    });
+    await manager.ensureEnvironment({
+      environmentId: "old-env",
+      workspacePath: "/tmp/release-pending-turn",
+    });
+    runtime.setPendingTurnStart("target", true);
+    expect(runtime.hasThread("target")).toBe(false);
+    await expect(
+      manager.releaseThreadForConfiguration({
+        environmentId: "current-env",
+        threadId: "target",
+      }),
+    ).rejects.toThrow("active or pending provider work");
+    expect(runtime.stopThread).not.toHaveBeenCalled();
+  });
+
+  it("retains unmanaged staged rewind lookup without selecting a managed sibling", async () => {
+    const manager = new RuntimeManager({
+      createRuntime: () => createFakeRuntime(),
+      provisionWorkspace: createProvisionWorkspaceMock("/tmp/lookup-workspace"),
+    });
+    const common = {
+      environmentId: "lookup-env",
+      workspacePath: "/tmp/lookup-workspace",
+    };
+    try {
+      const first = await manager.ensureEnvironment({
+        ...common,
+        targetThreadId: "managed-first",
+        configurationGeneration: 1,
+      });
+      const second = await manager.ensureEnvironment({
+        ...common,
+        targetThreadId: "managed-second",
+        configurationGeneration: 2,
+      });
+      expect(manager.getForThread(common.environmentId, "managed-first")).toBe(
+        first,
+      );
+      expect(manager.getForThread(common.environmentId, "managed-second")).toBe(
+        second,
+      );
+      expect(
+        manager.getForThread(common.environmentId, "unmanaged-rewind"),
+      ).toBeUndefined();
+      const legacy = await manager.ensureEnvironment(common);
+      expect(legacy.runtime.hasThread("unmanaged-rewind")).toBe(false);
+      expect(
+        manager.getForThread(common.environmentId, "unmanaged-rewind"),
+      ).toBe(legacy);
+      expect(manager.getForThread(common.environmentId, "managed-first")).toBe(
+        first,
+      );
+      expect(manager.getForThread(common.environmentId, "managed-second")).toBe(
+        second,
+      );
+      expect(
+        manager.getForThread("other-environment", "managed-first"),
+      ).toBeUndefined();
+    } finally {
+      await manager.shutdownAll();
+    }
+  });
+
   it("creates a runtime the first time an environment is requested", async () => {
     const provisionWorkspace = createProvisionWorkspaceMock("/tmp/env-1");
     const createRuntime = vi.fn(() => createFakeRuntime());

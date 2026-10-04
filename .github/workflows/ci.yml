@@ -22,8 +22,8 @@ concurrency:
 jobs:
   checks:
     name: Checks (ubuntu-latest, Node 22.x)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 30
+    runs-on: ${{ github.repository == 'get-bb/bb' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ github.repository == 'get-bb/bb' && 30 || 90 }}
 
     # `actions: read` is what lets the cache-usage check call the Actions API;
     # checkout needs `contents: read`. The check degrades to a skip without
@@ -97,8 +97,8 @@ jobs:
   # the same 4 vCPUs, which made tests the critical path of every run.
   tests:
     name: Tests (${{ matrix.shard }}, ubuntu-latest, Node 22.x)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 30
+    runs-on: ${{ github.repository == 'get-bb/bb' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ github.repository == 'get-bb/bb' && 30 || 90 }}
 
     strategy:
       fail-fast: false
@@ -157,16 +157,16 @@ jobs:
   package-smoke:
     name: Package Smoke (${{ matrix.os }}, Node ${{ matrix.node-version }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ github.repository == 'get-bb/bb' && 45 || 90 }}
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: blacksmith-4vcpu-ubuntu-2404
+          - os: ${{ github.repository == 'get-bb/bb' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
             node-version: "22.x"
             turbo-cache: "true"
-          - os: blacksmith-6vcpu-macos-15
+          - os: ${{ github.repository == 'get-bb/bb' && 'blacksmith-6vcpu-macos-15' || 'macos-15' }}
             node-version: "22.x"
             turbo-cache: "false"
 
@@ -204,21 +204,21 @@ jobs:
     name: Node Compatibility Smoke (${{ matrix.os }}, Node ${{ matrix.node-version }})
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ github.repository == 'get-bb/bb' && 30 || 90 }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: blacksmith-4vcpu-ubuntu-2404
+          - os: ${{ github.repository == 'get-bb/bb' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
             node-version: "24.x"
             turbo-cache: "true"
-          - os: blacksmith-4vcpu-ubuntu-2404
+          - os: ${{ github.repository == 'get-bb/bb' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
             node-version: "26.x"
             turbo-cache: "true"
-          - os: blacksmith-6vcpu-macos-15
+          - os: ${{ github.repository == 'get-bb/bb' && 'blacksmith-6vcpu-macos-15' || 'macos-15' }}
             node-version: "24.x"
             turbo-cache: "false"
-          - os: blacksmith-6vcpu-macos-15
+          - os: ${{ github.repository == 'get-bb/bb' && 'blacksmith-6vcpu-macos-15' || 'macos-15' }}
             node-version: "26.x"
             turbo-cache: "false"
 

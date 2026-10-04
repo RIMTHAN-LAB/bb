@@ -1,5 +1,7 @@
+import { ApiError } from "../../errors.js";
 import { advanceEnvironmentProvisioning } from "../environments/environment-engine.js";
 import { revokeThreadDesktopBrowserControl } from "../desktop-browsers.js";
+import { recordThreadConfigurationDelivery } from "./thread-provider-configuration.js";
 import {
   providerEnvironmentHasPendingWork,
   refreshProviderRetirement,
@@ -143,7 +145,8 @@ const threadStopRequestDeduper = createAsyncDeduper<string, void>();
 type InFlightThreadRpcKind =
   | "thread.start"
   | "thread.start.title-sync"
-  | "thread.stop";
+  | "thread.stop"
+  | "thread.configuration";
 
 class InFlightRpcGuard {
   private readonly held = new Set<string>();
@@ -171,6 +174,23 @@ class InFlightRpcGuard {
 }
 
 const inFlightThreadRpcGuard = new InFlightRpcGuard();
+
+export function claimThreadConfigurationTransition(threadId: string): boolean {
+  return inFlightThreadRpcGuard.claim(threadId, "thread.configuration");
+}
+
+export function releaseThreadConfigurationTransition(threadId: string): void {
+  inFlightThreadRpcGuard.release(threadId, "thread.configuration");
+}
+
+export function requireNoThreadConfigurationTransition(threadId: string): void {
+  if (inFlightThreadRpcGuard.isHeld(threadId, "thread.configuration"))
+    throw new ApiError(
+      409,
+      "thread_configuration_busy",
+      "The provider configuration is transitioning; retry after prepare",
+    );
+}
 
 export function hasLiveThreadStartInFlight(threadId: string): boolean {
   return inFlightThreadRpcGuard.isHeld(threadId, "thread.start");
@@ -706,7 +726,7 @@ function isThreadStartActivationStale(
 function lifecycleEventForSuccessfulThreadStart(
   command: ThreadStartCommand,
 ): ThreadLifecycleEvent {
-  if (command.fork && command.input.length === 0) {
+  if (command.input.length === 0) {
     return { type: "run.succeeded" };
   }
   return { type: "run.started" };
@@ -715,16 +735,13 @@ function lifecycleEventForSuccessfulThreadStart(
 function shouldAutoSendQueuedMessagesAfterThreadStart(
   command: ThreadStartCommand,
 ): boolean {
-  return command.fork !== null && command.input.length === 0;
+  return command.fork !== undefined && command.input.length === 0;
 }
 
 function recordEmptyThreadStartProviderSessionInTransaction(
   args: SettleThreadStartCommandResultArgs & { thread: Thread },
 ): void {
-  if (
-    !args.report.ok ||
-    !shouldAutoSendQueuedMessagesAfterThreadStart(args.command)
-  ) {
+  if (!args.report.ok || args.command.input.length !== 0) {
     return;
   }
   appendThreadEventInTransaction(args.deps.db, {
@@ -820,7 +837,6 @@ export function settleThreadStartCommandResult(
       report: args.report,
     });
   }
-
   const shouldSyncTitle =
     thread.title !== null &&
     inFlightThreadRpcGuard.isHeld(thread.id, "thread.start.title-sync");
@@ -840,6 +856,16 @@ export function settleThreadStartCommandResult(
       threadId: currentThread.id,
     })
   ) {
+    if (args.report.result.configurationDelivery !== undefined)
+      recordThreadConfigurationDelivery(
+        args.deps.db,
+        args.report.result.configurationDelivery,
+        {
+          threadId: args.command.threadId,
+          providerId: args.command.providerId,
+          providerSessionId: args.report.result.providerThreadId,
+        },
+      );
     const lifecycleEvent = lifecycleEventForSuccessfulThreadStart(args.command);
     recordEmptyThreadStartProviderSessionInTransaction({
       ...args,
@@ -893,6 +919,16 @@ export function settleTurnSubmitCommandResult(
       report: args.report,
     });
   }
+  if (args.report.result.configurationDelivery !== undefined)
+    recordThreadConfigurationDelivery(
+      args.deps.db,
+      args.report.result.configurationDelivery,
+      {
+        threadId: args.command.threadId,
+        providerId: args.command.resumeContext.providerId,
+        providerSessionId: args.command.resumeContext.providerThreadId,
+      },
+    );
   return emptyCommandResultSideEffects();
 }
 
@@ -1387,7 +1423,7 @@ export async function stopThreadForCurrentState(
     ) {
       return;
     }
-    await releaseIdleThreadRuntime(deps, thread.id, environment);
+    await releaseIdleThreadRuntime(deps, thread.id, environment, options);
     return;
   }
 
@@ -1400,18 +1436,20 @@ export async function stopThreadForCurrentState(
     return;
   }
 
-  await releaseIdleThreadRuntime(deps, thread.id, environment);
+  await releaseIdleThreadRuntime(deps, thread.id, environment, options);
 }
 
 async function releaseIdleThreadRuntime(
   deps: RequestThreadStopForCurrentStateDeps,
   threadId: string,
   environment: RequestThreadStopForCurrentStateEnvironment | null,
+  options?: { requireStopped: true },
 ): Promise<void> {
   if (environment === null) {
     return;
   }
   await runAwaitedThreadStopCommand(deps, {
+    requireStopped: options?.requireStopped,
     command: buildThreadStopCommand({
       environmentId: environment.id,
       hostId: environment.hostId,
@@ -1432,30 +1470,36 @@ async function runAwaitedThreadStopCommand(
     threadId: string;
   },
 ): Promise<void> {
-  await threadStopRequestDeduper.run(args.threadId, async () => {
-    inFlightThreadRpcGuard.claim(args.threadId, "thread.stop");
-    try {
-      await runLiveHostCommand(deps, {
-        command: args.command,
-        hostId: args.hostId,
-        timeoutMs: AWAITED_THREAD_STOP_TIMEOUT_MS,
-      });
-    } catch (error) {
-      deps.logger.warn(
-        { err: error, intent: args.command.intent, threadId: args.threadId },
-        "Awaited thread stop command failed",
-      );
-      if (args.requireStopped) throw error;
-      if (
-        args.command.intent === "release" &&
-        !isHostUnavailableApiError(error)
-      ) {
-        throw error;
+  try {
+    const stopIdentity = JSON.stringify([args.hostId, args.command]);
+    await threadStopRequestDeduper.run(stopIdentity, async () => {
+      if (!inFlightThreadRpcGuard.claim(args.threadId, "thread.stop"))
+        throw new ApiError(
+          409,
+          "thread_stop_busy",
+          "A different stop command is already in flight for this thread",
+        );
+      try {
+        await runLiveHostCommand(deps, {
+          command: args.command,
+          hostId: args.hostId,
+          timeoutMs: AWAITED_THREAD_STOP_TIMEOUT_MS,
+        });
+      } finally {
+        inFlightThreadRpcGuard.release(args.threadId, "thread.stop");
       }
-    } finally {
-      inFlightThreadRpcGuard.release(args.threadId, "thread.stop");
-    }
-  });
+    });
+  } catch (error) {
+    deps.logger.warn(
+      { err: error, intent: args.command.intent, threadId: args.threadId },
+      "Awaited thread stop command failed",
+    );
+    if (
+      args.requireStopped ||
+      (args.command.intent === "release" && !isHostUnavailableApiError(error))
+    )
+      throw error;
+  }
 }
 
 export function requestActiveRuntimeThreadStopIfNeeded(

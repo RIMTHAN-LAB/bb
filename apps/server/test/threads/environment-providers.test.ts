@@ -1292,6 +1292,20 @@ describe("environment providers are asked inside provisioning", () => {
       });
 
       expect(outcome.kind).toBe("dispatched");
+      const followUp = await attemptDispatch(harness.deps, {
+        thread: failedThread,
+        payload: { input: textInput("Continue the retry"), mode: "auto" },
+        source: { kind: "inline" },
+        queuePayload: { kind: "inline" },
+        origin: null,
+        originPluginId: null,
+        startedOnBehalfOf: null,
+        trigger: "user",
+      });
+      expect(followUp.kind).toBe("queued");
+      if (followUp.kind !== "queued")
+        throw new Error("Expected queued follow-up");
+      expect(followUp.entry.waitingOn).toEqual({ kind: "provisioning" });
       await vi.waitFor(() => {
         expect(getThread(harness.db, created.id)?.environmentId).toBe(
           environment.id,

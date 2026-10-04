@@ -16,6 +16,7 @@ import {
 
 interface SkillWorkspaceOptions extends JsonOutputOptions {
   environment?: string;
+  thread?: string;
   project?: string;
 }
 
@@ -66,6 +67,10 @@ function addWorkspaceOptions(command: Command): Command {
     .option(
       "--project <id>",
       "Project ID (defaults to BB_PROJECT_ID or personal)",
+    )
+    .option(
+      "--thread <id>",
+      "List or read native skills from this exact thread profile",
     )
     .option("--environment <id>", "Project environment workspace")
     .option("--json", "Print machine-readable JSON output");
@@ -178,6 +183,7 @@ export function registerSkillCommands(
         const result = await createCliBbSdk(getUrl()).skills.list({
           projectId: projectId(options, getContext()),
           environmentId: environmentId(options),
+          ...(options.thread === undefined ? {} : { threadId: options.thread }),
         });
         if (outputJson(options, result)) return;
         console.log(
@@ -212,6 +218,9 @@ export function registerSkillCommands(
           const result = await createCliBbSdk(getUrl()).skills.getContent({
             projectId: projectId(options, getContext()),
             environmentId: environmentId(options),
+            ...(options.thread === undefined
+              ? {}
+              : { threadId: options.thread }),
             skillId,
             path: options.path,
           });
@@ -229,6 +238,7 @@ export function registerSkillCommands(
         const result = await createCliBbSdk(getUrl()).skills.listFiles({
           projectId: projectId(options, getContext()),
           environmentId: environmentId(options),
+          ...(options.thread === undefined ? {} : { threadId: options.thread }),
           skillId,
         });
         if (outputJson(options, result)) return;
@@ -249,6 +259,7 @@ export function registerSkillCommands(
         const result = await createCliBbSdk(getUrl()).skills.update({
           projectId: projectId(options, getContext()),
           environmentId: environmentId(options),
+          ...(options.thread === undefined ? {} : { threadId: options.thread }),
           skillId,
           content: await readFile(options.file, "utf8"),
           revision: options.revision,
@@ -275,6 +286,7 @@ export function registerSkillCommands(
         const result = await createCliBbSdk(getUrl()).skills.remove({
           projectId: projectId(options, getContext()),
           environmentId: environmentId(options),
+          ...(options.thread === undefined ? {} : { threadId: options.thread }),
           skillId,
         });
         if (outputJson(options, result)) return;

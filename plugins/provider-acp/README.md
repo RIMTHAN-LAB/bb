@@ -40,3 +40,9 @@ What lives here:
 
 The kit itself, including the ACP wire schema, the delta translation, the
 per-agent dialects and the bridge process, is `packages/provider-bridge-acp`.
+
+## Managed Hermes profiles
+
+Hermes threads may bind an immutable `nativeContext.homePath`, a numeric configuration generation, and protected local MCP/instruction file references. The host launches Hermes with that profile before discovery; HTTP, SSE, and stdio connections must match the provider's advertised ACP transports. Protected contents stay on the host and are checked for ownership, mode, bounded size, canonical location, and SHA-256.
+
+Create with `dispatch: "deferred"`, bind the profile, then prepare the provider before submitting the first input. Preparation records daemon delivery separately from Hermes's advertised `_hermes/session/configure` capability readback; unavailable readback never means configuration was applied. Reconfiguration requires an idle explicit release, a newer generation, and a fresh provider instance restoring the exact existing native session. See [managed provider configuration](../../docs/configuration.md) for the SDK, CLI, reservation deadline, and release barrier.

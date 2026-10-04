@@ -823,8 +823,7 @@ describe("dispatchCommand", () => {
       .mockReturnValueOnce(newRuntime);
     const manager = new RuntimeManager({
       createRuntime: createRuntimeSpy,
-      provisionWorkspace: async (args) =>
-        createWorkspace(args.path),
+      provisionWorkspace: async (args) => createWorkspace(args.path),
     });
     await manager.ensureEnvironment({
       environmentId: "env-old",
@@ -1000,7 +999,7 @@ describe("dispatchCommand", () => {
     });
   });
 
-  it("skips a release when a turn started after the server read the thread", async () => {
+  it("refuses a release when a turn started after the server read the thread", async () => {
     const runtime = createRuntime();
     const manager = new RuntimeManager({
       createRuntime: () => runtime,
@@ -1012,7 +1011,7 @@ describe("dispatchCommand", () => {
     });
     runtime.setActiveTurn("thread-1", "turn-new");
 
-    const result = await dispatchCommand(
+    const result = dispatchCommand(
       {
         type: "thread.stop",
         intent: "release",
@@ -1033,9 +1032,201 @@ describe("dispatchCommand", () => {
       },
     );
 
+    await expect(result).rejects.toMatchObject({ code: "thread_release_busy" });
     expect(runtime.stopThread).not.toHaveBeenCalled();
     expect(runtime.getActiveTurnId("thread-1")).toBe("turn-new");
-    expect(result).toEqual({ providerCheckpointId: null });
+  });
+
+  it("releases the second managed profile in one environment without stopping its active sibling", async () => {
+    const sibling = createRuntime(),
+      target = createRuntime();
+    const manager = new RuntimeManager({
+      createRuntime: vi
+        .fn()
+        .mockReturnValueOnce(sibling)
+        .mockReturnValueOnce(target),
+      provisionWorkspace: async () =>
+        createWorkspace("/tmp/bb-profile-release"),
+    });
+    const common = {
+      environmentId: "env-profiles",
+      workspacePath: "/tmp/bb-profile-release",
+      configurationGeneration: 1,
+    };
+    await manager.ensureEnvironment({
+      ...common,
+      targetThreadId: "sibling",
+      nativeContext: { homePath: "/profiles/sibling" },
+    });
+    await manager.ensureEnvironment({
+      ...common,
+      targetThreadId: "target",
+      nativeContext: { homePath: "/profiles/target" },
+    });
+    sibling.setActiveTurn("sibling", "sibling-turn");
+    target.setIdle("target");
+    const flush = vi.fn(async () => undefined);
+    await expect(
+      dispatchCommand(
+        {
+          type: "thread.stop",
+          intent: "release",
+          environmentId: "env-profiles",
+          threadId: "target",
+        },
+        makeDispatchOptions({
+          runtimeManager: manager,
+          eventSink: { emit: vi.fn(), flush },
+        }),
+      ),
+    ).resolves.toEqual({ providerCheckpointId: null });
+    expect(target.stopThread).toHaveBeenCalledOnce();
+    expect(target.hasThread("target")).toBe(false);
+    expect(sibling.stopThread).not.toHaveBeenCalled();
+    expect(sibling.getActiveTurnId("sibling")).toBe("sibling-turn");
+    expect(flush).toHaveBeenCalledOnce();
+  });
+
+  it("interrupts the second managed profile without stopping its active sibling", async () => {
+    const sibling = createRuntime(),
+      target = createRuntime();
+    const manager = new RuntimeManager({
+      createRuntime: vi
+        .fn()
+        .mockReturnValueOnce(sibling)
+        .mockReturnValueOnce(target),
+      provisionWorkspace: async () =>
+        createWorkspace("/tmp/bb-profile-interrupt"),
+    });
+    const common = {
+      environmentId: "env-profiles",
+      workspacePath: "/tmp/bb-profile-interrupt",
+      configurationGeneration: 1,
+    };
+    await manager.ensureEnvironment({
+      ...common,
+      targetThreadId: "sibling",
+      nativeContext: { homePath: "/profiles/sibling" },
+    });
+    await manager.ensureEnvironment({
+      ...common,
+      targetThreadId: "target",
+      nativeContext: { homePath: "/profiles/target" },
+    });
+    sibling.setActiveTurn("sibling", "sibling-turn");
+    target.setActiveTurn("target", "target-turn");
+    const flush = vi.fn(async () => undefined);
+    await expect(
+      dispatchCommand(
+        {
+          type: "thread.stop",
+          intent: "interrupt",
+          environmentId: "env-profiles",
+          threadId: "target",
+        },
+        makeDispatchOptions({
+          runtimeManager: manager,
+          eventSink: { emit: vi.fn(), flush },
+        }),
+      ),
+    ).resolves.toEqual({ providerCheckpointId: null });
+    expect(target.waitForActiveTurn).toHaveBeenCalledWith("target", {
+      timeoutMs: 5_000,
+    });
+    expect(target.stopThread).toHaveBeenCalledOnce();
+    expect(target.hasThread("target")).toBe(false);
+    expect(sibling.stopThread).not.toHaveBeenCalled();
+    expect(sibling.getActiveTurnId("sibling")).toBe("sibling-turn");
+    expect(flush).toHaveBeenCalledOnce();
+  });
+
+  it("refuses an active old owner before stopping any idle current owner", async () => {
+    const old = createRuntime(),
+      current = createRuntime();
+    const manager = new RuntimeManager({
+      createRuntime: vi
+        .fn()
+        .mockReturnValueOnce(old)
+        .mockReturnValueOnce(current),
+      provisionWorkspace: async () => createWorkspace("/tmp/bb-release-owners"),
+    });
+    await manager.ensureEnvironment({
+      environmentId: "old",
+      workspacePath: "/tmp/bb-release-owners",
+    });
+    await manager.ensureEnvironment({
+      environmentId: "current",
+      workspacePath: "/tmp/bb-release-owners",
+    });
+    old.setActiveTurn("thread-1", "old-turn");
+    current.setIdle("thread-1");
+    await expect(
+      dispatchCommand(
+        {
+          type: "thread.stop",
+          intent: "release",
+          environmentId: "current",
+          threadId: "thread-1",
+        },
+        makeDispatchOptions({ runtimeManager: manager }),
+      ),
+    ).rejects.toMatchObject({ code: "thread_release_busy" });
+    expect(old.stopThread).not.toHaveBeenCalled();
+    expect(current.stopThread).not.toHaveBeenCalled();
+    expect(old.getActiveTurnId("thread-1")).toBe("old-turn");
+  });
+
+  it("propagates an unavailable exact provider stop without claiming success", async () => {
+    const target = createRuntime();
+    const manager = new RuntimeManager({
+      createRuntime: () => target,
+      provisionWorkspace: async () => createWorkspace(),
+    });
+    await manager.ensureEnvironment({
+      environmentId: "env-1",
+      workspacePath: WORKSPACE_PATH,
+    });
+    target.setIdle("thread-1");
+    (target.stopThread as Mock).mockRejectedValueOnce(
+      new Error("provider release unavailable"),
+    );
+    const flush = vi.fn(async () => undefined);
+    await expect(
+      dispatchCommand(
+        {
+          type: "thread.stop",
+          intent: "release",
+          environmentId: "env-1",
+          threadId: "thread-1",
+        },
+        makeDispatchOptions({
+          runtimeManager: manager,
+          eventSink: { emit: vi.fn(), flush },
+        }),
+      ),
+    ).rejects.toThrow("provider release unavailable");
+    expect(flush).not.toHaveBeenCalled();
+    expect(target.hasThread("thread-1")).toBe(true);
+  });
+
+  it("treats authoritative release absence as idempotent without creating a sibling runtime", async () => {
+    const create = vi.fn(() => createRuntime());
+    const manager = new RuntimeManager({
+      createRuntime: create,
+      provisionWorkspace: async () => createWorkspace(),
+    });
+    await expect(
+      dispatchCommand(
+        {
+          type: "thread.stop",
+          intent: "release",
+          environmentId: "missing",
+          threadId: "thread-1",
+        },
+        makeDispatchOptions({ runtimeManager: manager }),
+      ),
+    ).resolves.toEqual({ providerCheckpointId: null });
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("treats thread.stop as successful when no runtime holds the thread", async () => {
@@ -1149,8 +1340,7 @@ describe("dispatchCommand", () => {
       .mockReturnValueOnce(newRuntime);
     const manager = new RuntimeManager({
       createRuntime: createRuntimeSpy,
-      provisionWorkspace: async (args) =>
-        createWorkspace(args.path),
+      provisionWorkspace: async (args) => createWorkspace(args.path),
     });
     await manager.ensureEnvironment({
       environmentId: "env-old",
@@ -1200,8 +1390,7 @@ describe("dispatchCommand", () => {
       .mockReturnValueOnce(newRuntime);
     const manager = new RuntimeManager({
       createRuntime: createRuntimeSpy,
-      provisionWorkspace: async (args) =>
-        createWorkspace(args.path),
+      provisionWorkspace: async (args) => createWorkspace(args.path),
     });
     await manager.ensureEnvironment({
       environmentId: "env-old",

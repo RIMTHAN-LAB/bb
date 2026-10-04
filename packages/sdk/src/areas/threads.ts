@@ -13,11 +13,16 @@ import {
 } from "@bb/domain";
 import {
   DEFAULT_TURN_RETRY_REASON,
+  prepareThreadConfigurationRequestSchema,
+  releaseThreadConfigurationRequestSchema,
   threadTabsResponseSchema,
+  updateThreadRequestSchema,
 } from "@bb/server-contract";
 import type {
   CreateQueuedMessageRequest,
   CreateThreadRequest,
+  PrepareThreadConfigurationRequest,
+  ReleaseThreadConfigurationRequest,
   QueuedMessageListQuery,
   EditMessageRequest,
   EditMessageResponse,
@@ -202,8 +207,7 @@ export type ThreadStorageFilesResult = ThreadStorageFileListResponse;
 export type ThreadStorageLocationResult = ThreadStorageLocationResponse;
 export type ThreadStoragePathsResult = ThreadStoragePathListResponse;
 export type ThreadChildSummaryResult = ThreadChildSummaryResponse;
-export type ThreadDefaultExecutionOptionsResult =
-  ResolvedThreadExecutionOptions | null;
+export type ThreadDefaultExecutionOptionsResult = ResolvedThreadExecutionOptions | null;
 export type ThreadConversationOutlineResult = ThreadConversationOutlineResponse;
 export type ThreadTimelineTurnSummaryDetailsResult =
   TimelineTurnSummaryDetailsResponse;
@@ -240,6 +244,13 @@ export interface ThreadForkArgs extends Omit<
 export interface ThreadUpdateArgs extends UpdateThreadRequest {
   threadId: string;
 }
+export interface ThreadPrepareConfigurationArgs extends PrepareThreadConfigurationRequest {
+  threadId: string;
+}
+export type ThreadReleaseConfigurationArgs =
+  ReleaseThreadConfigurationRequest & {
+    threadId: string;
+  };
 
 export interface ThreadDeleteArgs extends DeleteThreadRequest {
   threadId: string;
@@ -572,6 +583,13 @@ export interface ThreadsArea {
   search(args: ThreadSearchArgs): Promise<ThreadSearchResult>;
   send(args: ThreadSendArgs): Promise<ThreadSendResult>;
   spawn(args: ThreadSpawnArgs): Promise<ThreadSpawnResult>;
+  releaseConfiguration(
+    args: ThreadReleaseConfigurationArgs,
+  ): Promise<ThreadMutationResult>;
+  /** Construct or restore an exact provider session and read back configuration without a model turn. */
+  prepareConfiguration(
+    args: ThreadPrepareConfigurationArgs,
+  ): Promise<ThreadMutationResult>;
   stop(args: ThreadActionArgs): Promise<ThreadStopResult>;
   tabs: ThreadTabsArea;
   timeline(args: ThreadTimelineArgs): Promise<ThreadTimelineResult>;
@@ -627,14 +645,18 @@ function countQuery(args: ThreadCountArgs | undefined): ThreadCountQuery {
 }
 
 function updateJson(args: ThreadUpdateArgs): UpdateThreadRequest {
-  return {
+  return updateThreadRequestSchema.parse({
     title: args.title,
     sectionId: args.sectionId,
     parentThreadId: args.parentThreadId,
     model: args.model,
     reasoningLevel: args.reasoningLevel,
     visibility: args.visibility,
-  };
+    nativeContext: args.nativeContext,
+    configurationGeneration: args.configurationGeneration,
+    releaseProviderSession: args.releaseProviderSession,
+    adoptionAttemptId: args.adoptionAttemptId,
+  });
 }
 
 function sendJson(args: ThreadSendArgs): SendMessageRequest {
@@ -1228,6 +1250,24 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
         transport.api.v1.threads[":id"].retry.$post({
           param: { id: input.threadId },
           json: retryJson(input),
+        }),
+      );
+    },
+    async releaseConfiguration(input) {
+      const { threadId, ...json } = input;
+      return transport.readJson(
+        transport.api.v1.threads[":id"].configuration.release.$post({
+          param: { id: threadId },
+          json: releaseThreadConfigurationRequestSchema.parse(json),
+        }),
+      );
+    },
+    async prepareConfiguration(input) {
+      const { threadId, ...json } = input;
+      return transport.readJson(
+        transport.api.v1.threads[":id"].configuration.prepare.$post({
+          param: { id: threadId },
+          json: prepareThreadConfigurationRequestSchema.parse(json),
         }),
       );
     },

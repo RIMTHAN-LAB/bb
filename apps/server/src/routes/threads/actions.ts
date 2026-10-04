@@ -52,6 +52,9 @@ import {
 import { acceptThreadSendRequest } from "../../services/threads/thread-send-request.js";
 import { editThreadMessage } from "../../services/threads/thread-edit-message.js";
 import { clearThreadContext } from "../../services/threads/thread-context-clear.js";
+import { withThreadContextClearGuard } from "../../services/threads/thread-context-mutation-guard.js";
+import { requireThreadAdoptionContextWritable } from "../../services/threads/thread-reservations.js";
+import { requireNoThreadConfigurationTransition } from "../../services/threads/thread-lifecycle.js";
 import {
   buildExecutionOptions,
   dispatchThreadUnarchiveCommand,
@@ -425,55 +428,67 @@ export function registerThreadActionRoutes(app: Hono, deps: AppDeps): void {
 
   post(routes.clearGoal, async (context) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
-    const activity = getThreadPromptBannerActivity(deps, thread);
-    if (activity.activeGoalCount === 0) {
-      throw new ApiError(409, "invalid_request", "No active Goal to clear");
-    }
-    const environment = await requireThreadCommandEnvironment(deps, {
-      thread,
-    });
-    const execution = await buildExecutionOptions(
-      deps,
-      {},
-      { threadId: thread.id },
-    );
-    const preparedRuntimeCommand = await prepareTurnSubmitCommandPayload(deps, {
-      environment,
-      execution,
-      input: [],
-      permissionEscalation: "deny",
-      target: { mode: "auto", expectedTurnId: null },
-      thread,
-    });
-    const result = await runLiveHostCommand(deps, {
-      command: {
-        type: "thread.goal.clear",
-        environmentId: environment.id,
-        threadId: thread.id,
-        options: preparedRuntimeCommand.options,
-        resumeContext: preparedRuntimeCommand.resumeContext,
-        bridgeLaunch: preparedRuntimeCommand.bridgeLaunch,
-      },
-      hostId: environment.hostId,
-      timeoutMs: LIVE_DAEMON_COMMAND_TIMEOUT_MS,
-    });
-    const updatedThread = requirePublicThread(deps.db, thread.id);
-    const updatedActivity = getThreadPromptBannerActivity(deps, updatedThread);
-    if (updatedActivity.activeGoalCount > 0 && !result.cleared) {
-      throw new ApiError(
-        409,
-        "invalid_request",
-        "The provider did not clear the active Goal",
+    return withThreadContextClearGuard(thread.id, async () => {
+      requireNoThreadConfigurationTransition(thread.id);
+      requireThreadAdoptionContextWritable(deps.db, thread.id);
+      const activity = getThreadPromptBannerActivity(deps, thread);
+      if (activity.activeGoalCount === 0) {
+        throw new ApiError(409, "invalid_request", "No active Goal to clear");
+      }
+      const environment = await requireThreadCommandEnvironment(deps, {
+        thread,
+      });
+      const execution = await buildExecutionOptions(
+        deps,
+        {},
+        { threadId: thread.id },
       );
-    }
-    if (updatedActivity.activeGoalCount > 0) {
-      throw new ApiError(
-        409,
-        "invalid_request",
-        "The provider did not confirm that the active Goal was cleared",
+      const preparedRuntimeCommand = await prepareTurnSubmitCommandPayload(
+        deps,
+        {
+          environment,
+          execution,
+          input: [],
+          permissionEscalation: "deny",
+          target: { mode: "auto", expectedTurnId: null },
+          thread,
+        },
       );
-    }
-    return context.json({ ok: true });
+      requireNoThreadConfigurationTransition(thread.id);
+      requireThreadAdoptionContextWritable(deps.db, thread.id);
+      const result = await runLiveHostCommand(deps, {
+        command: {
+          type: "thread.goal.clear",
+          environmentId: environment.id,
+          threadId: thread.id,
+          options: preparedRuntimeCommand.options,
+          resumeContext: preparedRuntimeCommand.resumeContext,
+          bridgeLaunch: preparedRuntimeCommand.bridgeLaunch,
+        },
+        hostId: environment.hostId,
+        timeoutMs: LIVE_DAEMON_COMMAND_TIMEOUT_MS,
+      });
+      const updatedThread = requirePublicThread(deps.db, thread.id);
+      const updatedActivity = getThreadPromptBannerActivity(
+        deps,
+        updatedThread,
+      );
+      if (updatedActivity.activeGoalCount > 0 && !result.cleared) {
+        throw new ApiError(
+          409,
+          "invalid_request",
+          "The provider did not clear the active Goal",
+        );
+      }
+      if (updatedActivity.activeGoalCount > 0) {
+        throw new ApiError(
+          409,
+          "invalid_request",
+          "The provider did not confirm that the active Goal was cleared",
+        );
+      }
+      return context.json({ ok: true });
+    });
   });
 
   post(routes.open, (context, payload) => {

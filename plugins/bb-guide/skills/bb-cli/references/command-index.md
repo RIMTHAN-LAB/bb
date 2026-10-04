@@ -123,6 +123,8 @@ configures the machine with optional configured `preset` and `image` names;
 - `bb thread`
 - `bb thread wait`
 - `bb thread spawn`
+- `bb thread release-configuration`
+- `bb thread prepare`
 - `bb thread fork`
 - `bb thread list`
 - `bb thread show`

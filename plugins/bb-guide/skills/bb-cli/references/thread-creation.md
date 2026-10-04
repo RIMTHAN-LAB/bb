@@ -221,3 +221,48 @@ Resuming a machine restores its provider state without rerunning environment set
 Personal file access: `bb project paths|files|content proj_personal` requires
 an explicit `--environment <id>` belonging to Personal. Personal has no default
 project source; the selected environment must be ready.
+
+## Reserve before the first turn
+
+Use `bb thread spawn --project <id> --provider <id> --defer-dispatch --json` to obtain the exact thread ID without a provider turn. SDK callers use `threads.spawn({ ..., input: [], dispatch: "deferred" })`. Install any host-owned binding before sending the first prompt through the ordinary `bb thread send` or SDK send API. Deferred creation forbids initial input and `sendAt`. The reservation expires after five minutes; an expired first send is refused and the server archives still-pending reservations, including after restart. The default immediate creation behavior is unchanged.
+
+Use `bb thread prepare ID --generation N --timeout-ms 30000 --json` after
+installing the exact host binding. It prepares the native session without a model
+turn. Inspect `configurationDelivery.providerReadback`; delivered status alone
+does not prove required capabilities were acknowledged. For an existing idle
+conversation, `bb thread release-configuration ID --generation OLD --json` obtains
+a trusted release marker. Release blocks dispatch until an advanced generation is
+installed and prepared; managed restore refuses silently replacing lost history.
+
+Hermes native profiles use `--native-home` plus optional protected-file pairs
+`--native-mcp-config`/`--native-mcp-sha256` and
+`--native-instructions-config`/`--native-instructions-sha256`, together with
+`--configuration-generation`. Paths refer to canonical owner-only regular files
+inside the immutable home on the execution host. MCP is limited to64KiB and
+native instructions to1MiB. The API exposes only paths/hashes. HTTP/SSE require
+actual ACP negotiation. SDK callers use the same `nativeContext` object.
+
+## Adopt a retained unmanaged conversation
+
+Read `bb thread show ID --json`: `providerSessionId` is the actual native pointer,
+not a delivery receipt. For an idle unmanaged thread, use
+`bb thread release-configuration ID --generation null --expected-provider-session NATIVE --json`.
+The server waits for an exact host stop and exposes a five-minute
+`dispatchReservation` with purpose `configuration-adoption`, `attemptId`, retained
+`providerSessionId`, `stoppedAt`, `expiresAt` and `state` (`reserved`, `failed`, `expired`).
+No model turn is sent. PATCH with
+`bb thread update ID --configuration-generation N --native-context-json '<json>' --adoption-attempt ATTEMPT --json`,
+then `bb thread prepare ID --generation N --adoption-attempt ATTEMPT --json`.
+The immutable native home and original session remain authoritative; preparation
+does not consume the reservation or prove required application by itself.
+
+Failed/expired adoption without real managed delivery can explicitly recover:
+`bb thread release-configuration ID --generation N_OR_NULL --expected-provider-session NATIVE --recover-adoption ATTEMPT --expected-native-context-json '<observed-json-or-null>' --json`.
+Before PATCH, generation and context must both be null; after PATCH they must
+match actual stored state. Live replay preserves the same deadline. A new recovery
+requires another successful exact stop; stale observations receive 409 without
+mutation. Expiry keeps the retained conversation and blocks dispatch. Once a real
+exact managed delivery exists, use ordinary numeric release instead. Managed
+updates expose `--release-provider-session` for the existing advanced-generation
+path. SDK callers use the same strict `threads.releaseConfiguration` union and
+`adoptionAttemptId` on `threads.update`/`prepareConfiguration`.

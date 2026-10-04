@@ -102,6 +102,7 @@ describe("THREAD_LIFECYCLE table", () => {
       error: {
         "run.preparing": "starting",
         "run.started": "active",
+        "stop.settled": "idle",
       },
     });
   });

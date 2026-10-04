@@ -4,6 +4,7 @@ import {
   dynamicToolSchema,
   instructionModeSchema,
   promptInputSchema,
+  providerConfigurationReadbackSchema,
 } from "@bb/domain";
 import { z } from "zod";
 import { bridgeExecutionOptionsSchema } from "./execution-options.js";
@@ -137,6 +138,8 @@ export const threadIdentityResultSchema = z
   .object({
     providerThreadId: z.string().min(1),
     sessionRestorable: z.boolean().optional(),
+    providerReadback: providerConfigurationReadbackSchema.optional(),
+    providerInstanceId: z.string().min(1).optional(),
   })
   .passthrough();
 

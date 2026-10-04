@@ -62,3 +62,9 @@ export * from "./thread-timeline-model-fallback.js";
 export * from "./thread-timeline-pending-todos.js";
 export * from "./thread-visibility.js";
 export * from "./thread.js";
+export * from "./thread-provider-configuration.js";
+
+export {
+  threadConfigurationReleaseSchema,
+  type ThreadConfigurationRelease,
+} from "./thread-provider-configuration.js";

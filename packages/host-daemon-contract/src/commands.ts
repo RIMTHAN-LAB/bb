@@ -24,6 +24,8 @@ import {
   jsonObjectSchema,
   jsonValueSchema,
   providerNativeRootSetSchema,
+  nativeContextSchema,
+  threadConfigurationDeliverySchema,
   BRANCH_LIST_LIMIT_MAX,
   BRANCH_LIST_QUERY_MAX_LENGTH,
   FILE_LIST_EXCLUDE_NAME_MAX_LENGTH,
@@ -214,6 +216,8 @@ const hostDaemonThreadRuntimeContextSchema = z
     dynamicTools: z.array(dynamicToolSchema),
     contributedEnv: z.array(hostDaemonContributedEnvEntrySchema).default([]),
     injectedSkillSources: z.array(hostDaemonInjectedSkillSourceSchema),
+    nativeContext: nativeContextSchema.optional(),
+    configurationGeneration: z.number().int().nonnegative().optional(),
     disallowedTools: z.array(z.string()).optional(),
     instructionMode: instructionModeSchema,
   })
@@ -298,7 +302,11 @@ const threadStartCommandSchema = hostDaemonThreadTargetSchema
   })
   .strict()
   .superRefine((value, ctx) => {
-    if (value.fork === undefined && value.input.length === 0) {
+    if (
+      value.fork === undefined &&
+      value.configurationGeneration === undefined &&
+      value.input.length === 0
+    ) {
       ctx.addIssue({
         code: "custom",
         message: "input must contain at least one entry",
@@ -353,6 +361,15 @@ const turnSubmitCommandSchema = hostDaemonThreadTargetSchema
   })
   .strict()
   .superRefine(refineGroupedInputMatchesFlatInput);
+
+const threadConfigurationPrepareCommandSchema = hostDaemonThreadTargetSchema
+  .extend({
+    type: z.literal("thread.configuration.prepare"),
+    options: runtimeThreadExecutionOptionsSchema,
+    bridgeLaunch: hostDaemonBridgeLaunchSchema,
+    resumeContext: turnResumeContextSchema,
+  })
+  .strict();
 
 const threadStopIntentSchema = z.enum(["interrupt", "release"]);
 
@@ -675,7 +692,7 @@ const directoryListingSchema = z.object({
 const hostCommandSourceSchema = z.enum(["skill", "command"]);
 export type HostCommandSource = z.infer<typeof hostCommandSourceSchema>;
 
-const hostCommandOriginSchema = z.enum(["project", "user"]);
+const hostCommandOriginSchema = z.enum(["project", "user", "plugin"]);
 export type HostCommandOrigin = z.infer<typeof hostCommandOriginSchema>;
 
 const hostProviderCommandSchema = z.object({
@@ -1206,9 +1223,11 @@ const providerListModelsResultSchema = z.object({
 
 const threadStartResultSchema = z.object({
   providerThreadId: z.string().min(1),
+  configurationDelivery: threadConfigurationDeliverySchema.optional(),
 });
 const turnSubmitResultSchema = z.object({
   appliedAs: z.enum(["new-turn", "steer"]),
+  configurationDelivery: threadConfigurationDeliverySchema.optional(),
 });
 const threadStopResultSchema = z
   .object({
@@ -1433,6 +1452,20 @@ export const hostDaemonCommandRegistry = {
     transport: "settled",
     retryable: false,
     flushEventsBeforeResult: true,
+    envLane: "read",
+  }),
+  "thread.configuration.prepare": defineHostDaemonCommandDescriptor({
+    type: "thread.configuration.prepare",
+    schema: threadConfigurationPrepareCommandSchema,
+    resultSchema: z
+      .object({
+        providerThreadId: z.string().min(1),
+        configurationDelivery: threadConfigurationDeliverySchema.optional(),
+      })
+      .strict(),
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
     envLane: "read",
   }),
   "turn.submit": defineHostDaemonCommandDescriptor({

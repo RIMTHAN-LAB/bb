@@ -19,6 +19,7 @@ const hermesSkillConfigSchema = z
   .object({
     skills: z
       .object({
+        plugin_dirs: z.array(z.string()).optional(),
         external_dirs: z.union([z.string(), z.array(z.string())]).optional(),
       })
       .passthrough()
@@ -64,6 +65,18 @@ export const resolveHermesNativeRoots: AcpNativeRootsResolver = async (
             env: args.env,
             homeDir: args.homeDir,
             value: configuredPath,
+          }),
+        }),
+      ),
+      ...(config?.skills?.plugin_dirs ?? []).map((value) =>
+        configuredSkillRoot({
+          origin: "plugin",
+          recursive: true,
+          skillPath: resolveConfiguredPath({
+            basePath: hermesDir,
+            env: args.env,
+            homeDir: args.homeDir,
+            value,
           }),
         }),
       ),

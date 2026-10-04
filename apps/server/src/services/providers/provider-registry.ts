@@ -47,6 +47,7 @@ export interface ProviderRegistration {
   nativeSkillRoots: ProviderNativeRoots;
   nativeCommandRoots: ProviderNativeRoots;
   resolvesNativeRoots: boolean;
+  supportsNativeContext?: boolean;
   deriveProviderOptions: (
     context: Omit<PluginProviderOptionsContext, "settings">,
   ) => Readonly<Record<string, JsonValue>>;
@@ -62,10 +63,7 @@ export interface ProviderRegistryService {
   get(providerId: string): ProviderRegistration | null;
   getRegistrationRevision(): number;
   lookupInstalled(key: ProviderHealthCacheKey): Promise<boolean> | undefined;
-  rememberInstalled(
-    key: ProviderHealthCacheKey,
-    value: Promise<boolean>,
-  ): void;
+  rememberInstalled(key: ProviderHealthCacheKey, value: Promise<boolean>): void;
   forgetInstalledKey(key: ProviderHealthCacheKey): void;
   forgetInstalledProvider(providerId: string): void;
   forgetAllInstalled(): void;

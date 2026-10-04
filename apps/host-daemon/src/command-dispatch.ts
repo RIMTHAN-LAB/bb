@@ -82,6 +82,7 @@ import {
   workspaceResolutionFailureFromError,
 } from "./workspace-resolution.js";
 import { userExecutableProcessOptions } from "./user-executable-env.js";
+import { ThreadReleaseBusyError } from "./runtime-manager.js";
 
 const THREAD_STOP_ACTIVE_TURN_WAIT_MS = 5_000;
 
@@ -346,15 +347,42 @@ const commandHandlers: CommandHandlerMap = {
     }
   },
   "thread.stop": async (command, options) => {
+    if (command.intent === "release") {
+      try {
+        const result =
+          await options.runtimeManager.releaseThreadForConfiguration({
+            environmentId: command.environmentId,
+            threadId: command.threadId,
+          });
+        await options.eventSink.flush();
+        return result;
+      } catch (error) {
+        if (error instanceof ThreadReleaseBusyError) {
+          throw new ExpectedCommandDispatchError(
+            "thread_release_busy",
+            error.message,
+          );
+        }
+        throw error;
+      }
+    }
     const released =
       await options.runtimeManager.releaseThreadFromOtherEnvironments({
         activeTurn: "interrupt",
         environmentId: command.environmentId,
         threadId: command.threadId,
       });
-    const entry = await options.runtimeManager.getOrAwait(
+    let entry = options.runtimeManager.getForThread(
       command.environmentId,
+      command.threadId,
     );
+    if (!entry) {
+      await options.runtimeManager.getOrAwait(command.environmentId);
+      entry = options.runtimeManager.getForThread(
+        command.environmentId,
+        command.threadId,
+      );
+    }
     if (!entry) {
       await options.eventSink.flush();
       return {
@@ -363,16 +391,9 @@ const commandHandlers: CommandHandlerMap = {
     }
     let providerCheckpointId = released.providerCheckpointId;
     if (entry.runtime.hasThread(command.threadId)) {
-      if (command.intent === "release") {
-        if (entry.runtime.getActiveTurnId(command.threadId) !== null) {
-          await options.eventSink.flush();
-          return { providerCheckpointId };
-        }
-      } else {
-        await entry.runtime.waitForActiveTurn(command.threadId, {
-          timeoutMs: THREAD_STOP_ACTIVE_TURN_WAIT_MS,
-        });
-      }
+      await entry.runtime.waitForActiveTurn(command.threadId, {
+        timeoutMs: THREAD_STOP_ACTIVE_TURN_WAIT_MS,
+      });
       const result = await entry.runtime.stopThread({
         threadId: command.threadId,
       });
@@ -545,6 +566,28 @@ const commandHandlers: CommandHandlerMap = {
 };
 
 const onlineRpcHandlers: OnlineRpcHandlerMap = {
+  "thread.configuration.prepare": async (command, options) => {
+    const release =
+      await options.runtimeManager.retainEnvironmentForThreadCommand(
+        command.environmentId,
+        command.threadId,
+      );
+    try {
+      const entry = await ensureThreadRuntime(command, options);
+      const configurationDelivery = entry.configurationDeliveries?.get(
+        command.threadId,
+      );
+      return {
+        providerThreadId: command.resumeContext.providerThreadId,
+        ...(configurationDelivery === undefined
+          ? {}
+          : { configurationDelivery }),
+      };
+    } finally {
+      release();
+    }
+  },
+
   "environment.hook.run": runEnvironmentHook,
   "environment.hook.cancel": cancelEnvironmentHook,
   "desktop.browser.list_instances": async (command, options) => {

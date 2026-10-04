@@ -1,3 +1,4 @@
+import { ApiError } from "../../errors.js";
 import { watch } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -100,6 +101,7 @@ import {
   recoverInterruptedGitPluginPromotion,
 } from "./install-sources.js";
 import { readPluginManifest, type PluginManifest } from "./manifest.js";
+import { ConfigurationPackages, type ConfigurationPackageRequest, type ConfigurationPackageExport } from "./configuration-package.js";
 import { listBundledPluginRegistrations } from "./builtin-registry.js";
 import {
   type BbPluginApi,
@@ -234,6 +236,7 @@ export interface PluginService {
   stopPeriodicUpdateChecks(): Promise<void>;
   listUpdateResults(): PluginUpdateCheckEntry[];
   getSource(id: string): Promise<PluginSourceView | undefined>;
+  getConfigurationPackage(request: ConfigurationPackageRequest): Promise<ConfigurationPackageExport>;
   applyUpdate(id: string): Promise<PluginApplyUpdateOutcome>;
   remove(id: string): Promise<boolean>;
   setEnabled(
@@ -870,6 +873,10 @@ const GENERIC_AGENT_TOOL_GLYPH = "Toolbox";
 
 export function createPluginService(deps: PluginServiceDeps): PluginService {
   const logger = deps.logger;
+  const configurationPackages = new ConfigurationPackages(deps.dataDir, async (id) => {
+    const row = getInstalledPlugin(deps.db, id);
+    return row === undefined ? undefined : readPluginManifest(row.rootDir);
+  });
   const bundledPlugins =
     deps.bundledPlugins ?? listBundledPluginRegistrations();
   const mentionSearchTimeoutMs =
@@ -1853,6 +1860,8 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     resolveCatalogNpmSource: (args) =>
       managedPluginArtifacts.resolveNpmCandidateForPlan(args),
 
+    getConfigurationPackage: (request) => withPluginOperationLock(REGISTRATION_MUTATION_KEY, () => configurationPackages.read(request)),
+
     installPath: (path) =>
       withPluginOperationLock(REGISTRATION_MUTATION_KEY, () =>
         installPathSource(path, ROOT_PLUGIN_SOURCE_SELECTION),
@@ -2339,6 +2348,12 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           }),
         );
         if (!outcome.ok) {
+          if (context.thread.configurationGeneration !== undefined)
+            throw new ApiError(
+              409,
+              "agent_configuration_refused",
+              `Plugin ${pluginId} refused the exact managed thread configuration`,
+            );
           selectedSkillIdsByPlugin.set(pluginId, new Set());
           continue;
         }

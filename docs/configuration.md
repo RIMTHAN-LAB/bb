@@ -1387,3 +1387,44 @@ invalid, or corrupt entries are rebuilt; development and compiler diagnostic
 modes bypass the cache. The cache has no user configuration and can be removed
 while no builds are running. See [build performance](build-performance.md) for
 its identity, portability, and verification contract.
+
+## Exact-thread native provider configuration
+
+Managed callers may reserve a thread with `dispatch:"deferred"` and bind
+`configurationGeneration` before using `threads.prepareConfiguration`. A future
+`dispatchReservation.expiresAt` acknowledges support; reservations last five
+minutes and preparation does not consume them. First work goes through ordinary
+`threads.send`. The CLI guide describes matching flags and release/prepare commands.
+
+Hermes supports an immutable `nativeContext.homePath`, with optional protected
+`mcpConfig` and `instructionsConfig` references `{path,sha256}`. The execution host
+requires existing canonical directories and owner-only regular mode0600 files
+inside that home, limited to64KiB MCP or1MiB native instructions. MCP JSON is
+`{servers:[{name,command,args,env:[{name,value}]}|{name,type:"http"|"sse",url,headers:[{name,value}]}]}`.
+Credentials remain in this protected local file. Remote transport support comes
+from actual ACP initialize capabilities. Unsupported providers/capabilities fail
+closed or return explicit unavailable readback; delivered is never applied.
+
+`threads.releaseConfiguration` releases an idle exact native session, retains its
+old delivery, and sets `configurationRelease`. That durable marker blocks direct
+and queued dispatch until an advanced generation is prepared by a distinct native
+provider instance. Home changes and hot active-provider updates are refused.
+
+For an existing unmanaged conversation, authenticated thread GET exposes the
+actual `providerSessionId:string|null` independently of delivery. Initial
+`threads.releaseConfiguration({threadId,configurationGeneration:null,expectedProviderSessionId})`
+requires an idle exact retained session and acknowledged provider stop. It creates
+an adoption-purpose dispatch reservation, not configuration or delivery:
+`{purpose:"configuration-adoption",attemptId,providerSessionId,stoppedAt,expiresAt,state}`.
+Its fixed five-minute lease is not renewed by GET, polling or live replay; expiry
+retains the conversation and its dispatch fence. Only that thread is released.
+
+PATCH and prepare carry `adoptionAttemptId` and keep the original native session
+and immutable home. Explicit failed/expired recovery without real delivery uses
+`recoverAdoption:{attemptId,expectedNativeContext}` plus the exact expected native
+session. Generation/context are both null before PATCH or match actual numeric
+generation/native context afterwards. Stale attempt or state receives typed 409
+without mutation; a fresh recovery repeats trusted stop and gets a new finite
+attempt. Real exact managed delivery switches recovery to ordinary numeric release.
+Preparation remains bounded to at most60s, dispatch remains separately gated, and
+no reservation or delivered status establishes required provider application.

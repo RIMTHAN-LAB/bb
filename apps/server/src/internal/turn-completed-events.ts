@@ -50,6 +50,8 @@ export function applyTurnCompletedEvent(
   if (!isRootTurnCompletion) {
     return { isRootTurnCompletion, nextStatus: null, thread };
   }
+  if (thread.status === "error" && payload.status === "interrupted")
+    return { isRootTurnCompletion, nextStatus: null, thread };
 
   const outcome = applyLoggedThreadLifecycleEvent(deps, {
     event: lifecycleEventForTurnCompletion(payload.status),

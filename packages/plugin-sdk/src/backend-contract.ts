@@ -1038,6 +1038,10 @@ export interface PluginAgentToolRegistrationBase {
 /** Stable, plain-data context resolved by the server for one agent session. */
 export interface PluginAgentConfigurationContext {
   thread: {
+    /** Exact persisted generation, absent for unmanaged legacy threads. */
+    configurationGeneration?: number;
+    /** Immutable execution-host native home and protected configuration references. */
+    nativeContext?: import("@bb/domain").NativeContext;
     id: string;
     title: string | null;
     parentThreadId: string | null;
@@ -1248,6 +1252,13 @@ export interface PluginProviderExtensionKindDeclaration {
 export interface PluginProviderOptionsContext {
   threadId: string;
   projectId: string;
+  /** Immutable, validated native home selected for this exact thread. */
+  configurationGeneration?: number;
+  nativeContext?: {
+    homePath: string;
+    mcpConfig?: { path: string; sha256: string };
+    instructionsConfig?: { path: string; sha256: string };
+  };
   /** The resolved model id for this command. */
   model: string;
   /** BB's permission mode for this command (already clamped to the host). */
@@ -1470,6 +1481,8 @@ export interface PluginProviderDeclaration {
    * project-scoped entries, which a global declaration cannot carry.
    */
   experimental_resolvesNativeRoots?: boolean;
+  /** Whether this provider honors the thread's immutable native home in both discovery and session launch. */
+  experimental_supportsNativeContext?: boolean;
   /**
    * Derive this provider's opaque per-command options. Called synchronously
    * by the server for every session and turn command on a thread of this

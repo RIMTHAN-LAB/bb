@@ -63,6 +63,8 @@ type AcpModelSelection =
     };
 
 export interface AcpSessionParams {
+  nativeContext?: import("@bb/domain").NativeContext;
+  configurationGeneration?: number;
   threadId: string;
   cwd: string;
   agent: { command: string; args: string[] };

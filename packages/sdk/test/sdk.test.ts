@@ -1185,6 +1185,251 @@ describe("@bb/sdk", () => {
     expect(queue.requests).toEqual([]);
   });
 
+  it("passes an explicit deferred dispatch through the public thread SDK", async () => {
+    const queue = createFetchQueue([
+      { body: { id: "thr_reserved" }, status: 201 },
+    ]);
+    const sdk = createBbSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://bb.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+    await sdk.threads.spawn({
+      projectId: "proj_123",
+      environment: { type: "reuse", environmentId: "env_123" },
+      input: [],
+      dispatch: "deferred",
+    });
+    expect(JSON.parse(queue.requests[0]!.bodyText!)).toEqual({
+      projectId: "proj_123",
+      environment: { type: "reuse", environmentId: "env_123" },
+      input: [],
+      dispatch: "deferred",
+      origin: "sdk",
+      startedOnBehalfOf: null,
+      originKind: null,
+    });
+  });
+
+  it("uses exact generation-fenced configuration release and preparation routes", async () => {
+    const queue = createFetchQueue([
+      { body: { id: "thr_bound" } },
+      { body: { id: "thr_bound" } },
+    ]);
+    const sdk = createBbSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://bb.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+    await sdk.threads.releaseConfiguration({
+      threadId: "thr_bound",
+      configurationGeneration: 3,
+    });
+    await sdk.threads.prepareConfiguration({
+      threadId: "thr_bound",
+      configurationGeneration: 4,
+      timeoutMs: 2000,
+    });
+    expect(
+      queue.requests.map((request) => [
+        request.method,
+        request.url,
+        JSON.parse(request.bodyText!),
+      ]),
+    ).toEqual([
+      [
+        "POST",
+        "http://bb.test/api/v1/threads/thr_bound/configuration/release",
+        { configurationGeneration: 3 },
+      ],
+      [
+        "POST",
+        "http://bb.test/api/v1/threads/thr_bound/configuration/prepare",
+        { configurationGeneration: 4, timeoutMs: 2000 },
+      ],
+    ]);
+  });
+
+  it("preserves exact retained-session adoption and staged native refs through SDK requests", async () => {
+    const nativeContext = {
+      homePath: "/workspace/profiles/retained",
+      instructionsConfig: {
+        path: "/workspace/profiles/retained/instructions",
+        sha256: "a".repeat(64),
+      },
+    };
+    const queue = createFetchQueue(
+      Array.from({ length: 6 }, () => ({
+        body: { id: "thr_retained", providerSessionId: "native-retained" },
+      })),
+    );
+    const sdk = createBbSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://bb.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+    await sdk.threads.releaseConfiguration({
+      threadId: "thr_retained",
+      configurationGeneration: null,
+      expectedProviderSessionId: "native-retained",
+    });
+    await sdk.threads.releaseConfiguration({
+      threadId: "thr_retained",
+      configurationGeneration: null,
+      expectedProviderSessionId: "native-retained",
+      recoverAdoption: { attemptId: "attempt-1", expectedNativeContext: null },
+    });
+    await sdk.threads.releaseConfiguration({
+      threadId: "thr_retained",
+      configurationGeneration: 1,
+      expectedProviderSessionId: "native-retained",
+      recoverAdoption: {
+        attemptId: "attempt-1",
+        expectedNativeContext: nativeContext,
+      },
+    });
+    await sdk.threads.update({
+      threadId: "thr_retained",
+      configurationGeneration: 2,
+      nativeContext,
+      adoptionAttemptId: "attempt-2",
+      releaseProviderSession: true,
+    });
+    await sdk.threads.prepareConfiguration({
+      threadId: "thr_retained",
+      configurationGeneration: 2,
+      timeoutMs: 2000,
+      adoptionAttemptId: "attempt-2",
+    });
+    await sdk.threads.update({
+      threadId: "thr_retained",
+      title: "ordinary metadata",
+    });
+    expect(
+      queue.requests.map((request) => [
+        request.method,
+        request.url,
+        JSON.parse(request.bodyText!),
+      ]),
+    ).toEqual([
+      [
+        "POST",
+        "http://bb.test/api/v1/threads/thr_retained/configuration/release",
+        {
+          configurationGeneration: null,
+          expectedProviderSessionId: "native-retained",
+        },
+      ],
+      [
+        "POST",
+        "http://bb.test/api/v1/threads/thr_retained/configuration/release",
+        {
+          configurationGeneration: null,
+          expectedProviderSessionId: "native-retained",
+          recoverAdoption: {
+            attemptId: "attempt-1",
+            expectedNativeContext: null,
+          },
+        },
+      ],
+      [
+        "POST",
+        "http://bb.test/api/v1/threads/thr_retained/configuration/release",
+        {
+          configurationGeneration: 1,
+          expectedProviderSessionId: "native-retained",
+          recoverAdoption: {
+            attemptId: "attempt-1",
+            expectedNativeContext: nativeContext,
+          },
+        },
+      ],
+      [
+        "PATCH",
+        "http://bb.test/api/v1/threads/thr_retained",
+        {
+          nativeContext,
+          configurationGeneration: 2,
+          releaseProviderSession: true,
+          adoptionAttemptId: "attempt-2",
+        },
+      ],
+      [
+        "POST",
+        "http://bb.test/api/v1/threads/thr_retained/configuration/prepare",
+        {
+          configurationGeneration: 2,
+          timeoutMs: 2000,
+          adoptionAttemptId: "attempt-2",
+        },
+      ],
+      [
+        "PATCH",
+        "http://bb.test/api/v1/threads/thr_retained",
+        { title: "ordinary metadata" },
+      ],
+    ]);
+  });
+
+  it("refuses mixed recovery snapshots before sending and preserves the server's stale-attempt 409", async () => {
+    const queue = createFetchQueue([
+      {
+        status: 409,
+        body: {
+          code: "configuration_adoption_stale",
+          message: "The adoption attempt changed",
+        },
+      },
+    ]);
+    const sdk = createBbSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://bb.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+    await expect(
+      sdk.threads.releaseConfiguration({
+        threadId: "thr_retained",
+        configurationGeneration: 1,
+        expectedProviderSessionId: "native-retained",
+        recoverAdoption: {
+          attemptId: "attempt-1",
+          expectedNativeContext: null,
+        },
+      }),
+    ).rejects.toThrow("Recovery generation and native context");
+    await expect(
+      sdk.threads.update({
+        threadId: "thr_retained",
+        title: "metadata",
+        adoptionAttemptId: "attempt-1",
+      }),
+    ).rejects.toThrow("adoptionAttemptId requires configurationGeneration");
+    expect(queue.requests).toEqual([]);
+    await expect(
+      sdk.threads.releaseConfiguration({
+        threadId: "thr_retained",
+        configurationGeneration: null,
+        expectedProviderSessionId: "native-retained",
+        recoverAdoption: {
+          attemptId: "attempt-1",
+          expectedNativeContext: null,
+        },
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "configuration_adoption_stale",
+    });
+    expect(queue.requests).toHaveLength(1);
+  });
+
   it("fills thread spawn defaults before sending a request", async () => {
     const queue = createFetchQueue([{ body: { id: "thr_1" }, status: 201 }]);
     const sdk = createBbSdk({

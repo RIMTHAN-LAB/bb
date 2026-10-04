@@ -2,6 +2,9 @@ import {
   isStandaloneBuiltinCompactCommand,
   pendingInteractionResolutionSchema,
   reasoningEffortsForLevels,
+  UNAVAILABLE_PROVIDER_CONFIGURATION_READBACK,
+  nativeContextSchema,
+  providerConfigurationReadbackSchema,
 } from "@bb/domain";
 import type { AvailableModel, PromptInput, ReasoningLevel } from "@bb/domain";
 import { acpLaunchSpecSchema, type AcpLaunchSpec } from "../launch-spec.js";
@@ -31,13 +34,18 @@ import {
 } from "@bb/provider-bridge-protocol/bridge-kit";
 import type { BridgeJsonRpcResponse } from "@bb/provider-bridge-protocol/bridge-kit";
 import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { promises as fs, readFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute, basename, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
+import { readNativeProtectedFile } from "./native-protected-files.js";
+import {
+  readNativeMcpConfig,
+  type NativeAcpMcpServer,
+} from "./native-mcp-config.js";
 
 type DecodedToolCallResponse = ReturnType<typeof decodeToolCallResponsePayload>;
 type BridgeToolCallContent = DecodedToolCallResponse["contentBlocks"][number];
@@ -160,7 +168,12 @@ interface AcpPendingTurnInput {
 
 interface AcpThreadSession {
   bbThreadId: string;
+  providerInstanceId: string;
+  mcpInitializedAt?: number;
+  mcpListedAt?: number;
+  mcpToolNames?: string[];
   construction: AcpSessionParams;
+  configurationReadback?: import("@bb/domain").ProviderConfigurationReadback;
   providerThreadId: string;
   cwd: string;
   dialect: AcpDialect;
@@ -382,10 +395,40 @@ function handleDynamicToolBridgeSocket(
       return;
     }
     if (request.data.kind === "initialized") {
+      const session = sessionsByBbThreadId.get(request.data.threadId);
+      if (
+        session === undefined ||
+        request.data.toolCount !==
+          (session.construction.dynamicTools?.length ?? 0)
+      ) {
+        socket.end(
+          `${JSON.stringify({ ok: false, error: "MCP catalog does not match this session" })}\n`,
+        );
+        return;
+      }
+      session.mcpInitializedAt = Date.now();
       process.stderr.write(
         `acp bridge: "${ACP_BRIDGE_MCP_SERVER_NAME}" answered initialize for thread "${request.data.threadId}" (${request.data.toolCount} tools)\n`,
       );
       socket.end(`${JSON.stringify({ ok: true, content: "" })}\n`);
+      return;
+    }
+    if (request.data.kind === "toolsListed") {
+      const session = sessionsByBbThreadId.get(request.data.threadId);
+      if (
+        session !== undefined &&
+        isDeepStrictEqual(
+          request.data.toolNames,
+          (session.construction.dynamicTools ?? []).map((tool) => tool.name),
+        )
+      ) {
+        session.mcpListedAt = Date.now();
+        session.mcpToolNames = [...request.data.toolNames];
+        socket.end(`${JSON.stringify({ ok: true, content: "" })}\n`);
+      } else
+        socket.end(
+          `${JSON.stringify({ ok: false, error: "MCP catalog does not match this session" })}\n`,
+        );
       return;
     }
     void forwardDynamicToolCall(request.data).then((response) => {
@@ -430,10 +473,15 @@ async function ensureDynamicToolBridge(): Promise<AcpDynamicToolBridge> {
 
 async function buildSessionMcpServers(
   params: AcpSessionParams,
-): Promise<AcpMcpServerConfig[]> {
+  capabilities?: { http?: boolean; sse?: boolean },
+): Promise<NativeAcpMcpServer[]> {
+  const nativeServers = await readNativeMcpConfig(
+    params.nativeContext,
+    capabilities,
+  );
   const dynamicTools = params.dynamicTools ?? [];
   if (dynamicTools.length === 0) {
-    return [];
+    return nativeServers;
   }
   const bridge = await ensureDynamicToolBridge();
   const config = buildAcpMcpServerConfig({
@@ -449,7 +497,7 @@ async function buildSessionMcpServers(
   process.stderr.write(
     `acp bridge: built "${config.name}" session MCP config for thread "${params.threadId}" (${dynamicTools.length} tools)\n`,
   );
-  return [config];
+  return [config, ...nativeServers];
 }
 
 const ACP_DEFAULT_MODEL: AvailableModel = {
@@ -643,6 +691,12 @@ interface AcpDynamicToolBridge {
 }
 
 const dynamicToolBridgeRequestSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("toolsListed"),
+    threadId: z.string().min(1),
+    token: z.string().min(1),
+    toolNames: z.array(z.string().min(1)).max(1024),
+  }),
   z.object({
     kind: z.literal("initialized"),
     threadId: z.string().min(1),
@@ -1702,6 +1756,7 @@ async function startAgentSession(
   session = {
     bbThreadId,
     construction: params,
+    providerInstanceId: randomBytes(32).toString("hex"),
     providerThreadId: "",
     cwd: params.cwd,
     dialect,
@@ -1760,9 +1815,16 @@ async function startAgentSession(
       );
     }
     session.supportsLoadSession = supportsLoadSession;
-    const mcpServers = await buildSessionMcpServers(params);
+    const mcpServers = await buildSessionMcpServers(
+      params,
+      initializeResult.agentCapabilities?.mcpCapabilities,
+    );
     const mcpServer = mcpServers[0];
-    if (mcpServer) {
+    if (
+      mcpServer &&
+      !("type" in mcpServer) &&
+      mcpServer.name === ACP_BRIDGE_MCP_SERVER_NAME
+    ) {
       session.cursorMcpApproval = await approveCursorSessionMcpServer({
         agentCommand: params.agent.command,
         config: mcpServer,
@@ -1814,10 +1876,22 @@ async function startAgentSession(
           },
           resultSchema: z.union([acpConfigStateResultSchema, z.null()]),
         });
+        if (
+          configState === null &&
+          params.configurationGeneration !== undefined
+        )
+          throw new Error(
+            "Managed ACP session restore returned no exact session",
+          );
         loadedConfigOptions = configState?.configOptions;
         loadedModels = configState?.models;
         sessionId = request.resumeProviderThreadId;
-      } catch {
+      } catch (error) {
+        if (params.configurationGeneration !== undefined)
+          throw new Error(
+            "Managed ACP session restore failed; refusing conversation replacement",
+            { cause: error },
+          );
         sessionId = undefined;
         session.loading = false;
         session.loadingSessionId = undefined;
@@ -1826,6 +1900,13 @@ async function startAgentSession(
     }
 
     if (sessionId === undefined) {
+      if (
+        request.kind === "resume" &&
+        params.configurationGeneration !== undefined
+      )
+        throw new Error(
+          "Managed ACP session restore requires native session/load support",
+        );
       session.loading = false;
       session.loadingSessionId = undefined;
       session.pendingLoadUsageUpdate = undefined;
@@ -1876,6 +1957,90 @@ async function startAgentSession(
       );
     }
     session.providerThreadId = sessionId;
+    const metadata = z
+      .object({
+        _meta: z
+          .object({
+            hermes: z
+              .object({ configurationReadback: z.literal(1) })
+              .passthrough(),
+          })
+          .passthrough(),
+      })
+      .passthrough()
+      .safeParse(initializeResult);
+    if (metadata.success && params.configurationGeneration !== undefined) {
+      const nativeInstructions =
+        params.nativeContext?.instructionsConfig === undefined
+          ? undefined
+          : (
+              await readNativeProtectedFile(
+                params.nativeContext,
+                params.nativeContext.instructionsConfig,
+                1_048_576,
+              )
+            ).toString("utf8");
+      const configured = await connection.request({
+        method: "_hermes/session/configure",
+        params: {
+          sessionId,
+          generation: params.configurationGeneration,
+          instructions: params.instructions ?? "",
+          ...(nativeInstructions === undefined ? {} : { nativeInstructions }),
+        },
+        resultSchema: z
+          .object({
+            sessionId: z.string().min(1),
+            generation: z.number().int().nonnegative(),
+            skills: providerConfigurationReadbackSchema.shape.skills,
+            instructions:
+              providerConfigurationReadbackSchema.shape.instructions,
+            nativeInstructions:
+              providerConfigurationReadbackSchema.shape.nativeInstructions,
+            nativeMcp: providerConfigurationReadbackSchema.shape.nativeMcp,
+            nativeConversation:
+              providerConfigurationReadbackSchema.shape.nativeConversation,
+            nativeToolNames:
+              providerConfigurationReadbackSchema.shape.nativeToolNames,
+          })
+          .strict(),
+      });
+      if (
+        configured.sessionId !== sessionId ||
+        configured.generation !== params.configurationGeneration ||
+        configured.instructions.status !== "observed" ||
+        configured.instructions.instructionsDigest !==
+          createHash("sha256")
+            .update(params.instructions ?? "")
+            .digest("hex")
+      )
+        throw new Error(
+          "Hermes native configuration acknowledgement does not match this exact session",
+        );
+      if (
+        nativeInstructions !== undefined &&
+        (configured.nativeInstructions.status !== "observed" ||
+          configured.nativeInstructions.nativeInstructionsDigest !==
+            createHash("sha256").update(nativeInstructions).digest("hex"))
+      )
+        throw new Error(
+          "Hermes native instruction acknowledgement does not match the exact protected file",
+        );
+      session.configurationReadback = {
+        ...UNAVAILABLE_PROVIDER_CONFIGURATION_READBACK,
+        skills: configured.skills,
+        instructions: configured.instructions,
+        nativeInstructions: configured.nativeInstructions,
+        nativeMcp: configured.nativeMcp,
+        ...(configured.nativeConversation === undefined
+          ? {}
+          : { nativeConversation: configured.nativeConversation }),
+        ...(configured.nativeToolNames === undefined
+          ? {}
+          : { nativeToolNames: configured.nativeToolNames }),
+      };
+      session.pendingInstructions = undefined;
+    }
     bbThreadIdByProviderThreadId.set(sessionId, bbThreadId);
     sendNotification(BRIDGE_NOTIFICATION_METHODS.threadIdentity, {
       threadId: bbThreadId,
@@ -2569,6 +2734,18 @@ async function handleRequest(
         providerLabel: launchSpec.displayName,
         threadId: params.threadId,
       });
+      if (
+        params.options.providerOptions?.acpConfigurationGeneration !== undefined
+      )
+        sessionParams.configurationGeneration = z
+          .number()
+          .int()
+          .nonnegative()
+          .parse(params.options.providerOptions.acpConfigurationGeneration);
+      if (params.options.providerOptions?.acpNativeContext !== undefined)
+        sessionParams.nativeContext = nativeContextSchema.parse(
+          params.options.providerOptions?.acpNativeContext,
+        );
       const session = await startAgentSession(
         request.method === "thread/resume"
           ? {
@@ -2587,6 +2764,24 @@ async function handleRequest(
       sendResult(request.id, {
         providerThreadId: session.providerThreadId,
         sessionRestorable: session.supportsLoadSession,
+        providerInstanceId: session.providerInstanceId,
+        providerReadback: {
+          ...(session.configurationReadback ??
+            UNAVAILABLE_PROVIDER_CONFIGURATION_READBACK),
+          ...(session.mcpInitializedAt === undefined ||
+          session.mcpListedAt === undefined ||
+          session.mcpToolNames === undefined
+            ? {}
+            : {
+                tools: {
+                  status: "observed",
+                  protocol: "mcp",
+                  toolNames: session.mcpToolNames,
+                  initializedAt: session.mcpInitializedAt,
+                  listedAt: session.mcpListedAt,
+                },
+              }),
+        },
       });
       return;
     }

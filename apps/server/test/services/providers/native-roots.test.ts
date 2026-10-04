@@ -116,6 +116,47 @@ function registration(
 }
 
 describe("resolveProviderNativeRootSet", () => {
+  it("isolates cached roots by exact thread and native profile home on the same host/workdir", async () => {
+    await withTestHarness({ extraProviders: [RESOLVING] }, async (harness) => {
+      harness.deps.pluginHostArtifacts.set(
+        PLUGIN_ID,
+        stubHostArtifact(PLUGIN_ID),
+      );
+      const stub = registerResolverHost(harness, "host-profiles");
+      const reg = registration(harness, "resolving");
+      const common = {
+        registration: reg,
+        hostId: "host-profiles",
+        cwd: "/same-team",
+        timeoutMs: 2000,
+      };
+      await resolveProviderNativeRootSet(harness.deps, {
+        ...common,
+        threadId: "recipient-a",
+        nativeContext: { homePath: "/profiles/a" },
+      });
+      await resolveProviderNativeRootSet(harness.deps, {
+        ...common,
+        threadId: "recipient-b",
+        nativeContext: { homePath: "/profiles/b" },
+      });
+      await resolveProviderNativeRootSet(harness.deps, {
+        ...common,
+        threadId: "recipient-a",
+        nativeContext: { homePath: "/profiles/a" },
+      });
+      expect(stub.calls).toHaveLength(2);
+      expect(
+        stub.calls.map((call) =>
+          call.command.type === "plugin.host.call" ? call.command.input : null,
+        ),
+      ).toMatchObject([
+        { threadId: "recipient-a", nativeContext: { homePath: "/profiles/a" } },
+        { threadId: "recipient-b", nativeContext: { homePath: "/profiles/b" } },
+      ]);
+    });
+  });
+
   it("asks the plugin on the workspace host once per (host, cwd) within the TTL", async () => {
     let clock = 1_000;
     await withTestHarness(

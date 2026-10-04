@@ -27,6 +27,7 @@ import type {
   ThemeSetInput as RootThemeSetInput,
   ThreadSectionListResult as RootThreadSectionList,
   ThreadSpawnResult as RootThreadSpawn,
+  ThreadReleaseConfigurationArgs as RootThreadReleaseConfigurationArgs,
 } from "@bb/sdk";
 import type {
   BbSdk as BrowserBbSdk,
@@ -389,6 +390,8 @@ type ExpectedThreadsKey =
   | "paneAction"
   | "pin"
   | "promptHistory"
+  | "prepareConfiguration"
+  | "releaseConfiguration"
   | "queue"
   | "queuedMessages"
   | "reorderPinned"
@@ -443,6 +446,20 @@ type ExpectedTerminalsKey =
   | "resize";
 
 describe("SDK public type entrypoints", () => {
+  it("keeps configuration adoption arguments identical on all entrypoints", () => {
+    expectTypeOf<
+      Parameters<RootBbSdk["threads"]["releaseConfiguration"]>[0]
+    >().toEqualTypeOf<RootThreadReleaseConfigurationArgs>();
+    expectTypeOf<
+      Parameters<BrowserBbSdk["threads"]["releaseConfiguration"]>[0]
+    >().toEqualTypeOf<RootThreadReleaseConfigurationArgs>();
+    expectTypeOf<
+      Parameters<CoreBbSdk["threads"]["releaseConfiguration"]>[0]
+    >().toEqualTypeOf<RootThreadReleaseConfigurationArgs>();
+    expectTypeOf<
+      Parameters<NodeBbSdk["threads"]["releaseConfiguration"]>[0]
+    >().toEqualTypeOf<RootThreadReleaseConfigurationArgs>();
+  });
   it("export the same transport-independent DTO surface", () => {
     expectTypeOf<BrowserSurface>().toEqualTypeOf<RootSurface>();
     expectTypeOf<CoreSurface>().toEqualTypeOf<RootSurface>();

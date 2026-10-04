@@ -28,6 +28,7 @@ import {
   normalizeProviderResolvedNativeRoot,
   providerResolvedNativeRootInputSchema,
   providerResolvedNativeRootsSchema,
+  nativeContextSchema,
   type ProviderResolvedNativeRootInput,
   type ProviderResolvedNativeRoots,
 } from "@bb/domain";
@@ -42,6 +43,8 @@ export const experimental_nativeRootsResolveInputSchema = z
     providerId: z.string().min(1),
     /** The workspace, or null when bb lists without one (user roots only). */
     cwd: z.string().min(1).nullable(),
+    threadId: z.string().min(1).optional(),
+    nativeContext: nativeContextSchema.optional(),
   })
   .strict();
 export type ExperimentalNativeRootsResolveInput = z.infer<

@@ -107,6 +107,7 @@ export function ensureWorkspaceReadyEventInTransaction(
 }
 
 interface FailThreadProvisioningArgs {
+  code?: string;
   detail: string;
   environmentId: string | null;
   thread: Thread;
@@ -145,7 +146,7 @@ export function failThreadProvisioning(
   appendSystemErrorEvent(deps, {
     threadId: args.thread.id,
     environmentId: args.environmentId,
-    code: "thread_provisioning_failed",
+    code: args.code ?? "thread_provisioning_failed",
     message: "Provisioning thread failed",
     detail: args.detail,
     scope: threadScope(),

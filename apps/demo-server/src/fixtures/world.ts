@@ -105,6 +105,7 @@ export function threadResponse(
     ...thread
   } = threadListEntry(view, now);
   return {
+    providerSessionId: null,
     ...thread,
     activeBackgroundAgentCount: 0,
     canSpawnChild: true,
