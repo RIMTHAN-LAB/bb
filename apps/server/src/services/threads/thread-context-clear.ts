@@ -16,6 +16,7 @@ import {
 import { requireThreadAdoptionContextWritable } from "./thread-reservations.js";
 import { buildThreadStatusChangeMetadata } from "./thread-runtime-display.js";
 import { requestQueuedMessageDispatch } from "./queued-message-dispatch.js";
+import { requireThreadRuntimeCapability } from "../hosts/runtime-capability.js";
 
 export async function clearThreadContext(
   deps: LoggedPendingInteractionWorkSessionDeps,
@@ -24,6 +25,7 @@ export async function clearThreadContext(
     thread: Thread;
   },
 ): Promise<void> {
+  requireThreadRuntimeCapability(deps, args.thread.id, args.environment.hostId);
   await withThreadContextClearGuard(args.thread.id, async () => {
     requireNoThreadConfigurationTransition(args.thread.id);
     requireThreadAdoptionContextWritable(deps.db, args.thread.id);
@@ -50,6 +52,7 @@ export async function clearThreadContext(
     }
 
     await stopThreadForCurrentState(deps, thread, args.environment);
+    requireThreadRuntimeCapability(deps, thread.id, args.environment.hostId);
     requireNoThreadConfigurationTransition(thread.id);
     requireThreadAdoptionContextWritable(deps.db, thread.id);
     const releasedThread = getThread(deps.db, thread.id);

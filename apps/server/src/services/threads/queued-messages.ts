@@ -17,6 +17,7 @@ import {
   type QueuedThreadMessageGroupEligibility,
 } from "@bb/db";
 import { queuedMessageSystemNoticeSchema } from "@bb/domain";
+import { requireThreadRuntimeCapability } from "../hosts/runtime-capability.js";
 import type {
   PromptInput,
   QueuedMessageWaitingOn,
@@ -768,6 +769,7 @@ export async function sendQueuedMessage(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: SendQueuedMessageArgs,
 ): Promise<ThreadQueuedMessage> {
+  requireThreadRuntimeCapability(deps, args.threadId);
   const sendNow = args.claimPolicy.kind === "explicit-send";
   const queuedMessages = claimQueuedThreadMessageForSend(deps, args);
   if (queuedMessages.length === 0) {

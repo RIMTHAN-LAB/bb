@@ -571,7 +571,17 @@ export type ThreadGetQuery = z.infer<typeof threadGetQuerySchema>;
 
 export const threadWithIncludesResponseSchema = threadResponseSchema.extend({
   environment: environmentSchema.nullable().optional(),
-  host: hostSchema.nullable().optional(),
+  host: hostSchema
+    .extend({
+      runtimeSession: z
+        .object({
+          id: z.string().min(1),
+          protocolVersion: z.number().int().positive(),
+        })
+        .nullable(),
+    })
+    .nullable()
+    .optional(),
 });
 export type ThreadWithIncludesResponse = z.infer<
   typeof threadWithIncludesResponseSchema

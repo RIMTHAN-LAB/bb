@@ -1390,6 +1390,15 @@ its identity, portability, and verification contract.
 
 ## Exact-thread native provider configuration
 
+An enrolled protocol 203 daemon can continue unmanaged conversations through the
+existing legacy provider path. Native configuration, adoption and strict provider
+release require protocol 204. Thread GET with `include=host` exposes
+`host.runtimeSession:{id,protocolVersion}|null`, sourced from the current
+authenticated, online, active, unexpired daemon session; a rejected version or
+historical session is not capability evidence. Missing or expired capability
+refuses native work. Managed generation 0 and retained failed/expired adoption
+never select the legacy path.
+
 Managed callers may reserve a thread with `dispatch:"deferred"` and bind
 `configurationGeneration` before using `threads.prepareConfiguration`. A future
 `dispatchReservation.expiresAt` acknowledges support; reservations last five

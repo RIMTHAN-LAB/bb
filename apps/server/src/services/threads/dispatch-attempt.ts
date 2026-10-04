@@ -39,6 +39,7 @@ import { startedOnBehalfOfSchema } from "@bb/server-contract";
 import type { PluginDispatchEnvironmentIntent } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { ApiError } from "../../errors.js";
+import { requireThreadRuntimeCapability } from "../hosts/runtime-capability.js";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { requirePublicProject } from "../lib/entity-lookup.js";
 import {
@@ -316,6 +317,12 @@ async function runDispatchAttempt(
   reattempted: boolean,
 ): Promise<DispatchAttemptOutcome> {
   const { payload, thread } = args;
+  const intent = intendedThreadIntent(deps, thread.id);
+  requireThreadRuntimeCapability(
+    deps,
+    thread.id,
+    intent === null ? undefined : hostIdForEnvironmentIntent(deps, intent),
+  );
   requireNoThreadConfigurationTransition(thread.id);
   requirePreparedThreadConfiguration(deps.db, thread.id);
   requireUnexpiredDispatchReservation(deps.db, thread.id);
@@ -632,6 +639,7 @@ async function runDispatchAttempt(
     trigger: args.trigger,
     ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
     beforeAppendInTransaction: ({ tx }) => {
+      requireThreadRuntimeCapability(deps, thread.id, environment.hostId);
       requireNoThreadConfigurationTransition(thread.id);
       requirePreparedThreadConfiguration(deps.db, thread.id);
       if (resolvedPayload.input.length > 0) {
@@ -758,6 +766,7 @@ async function admitPendingThread(
   }
   const execution = await buildExecutionOptions(deps, args.payload, {
     threadId: args.thread.id,
+    hostId: hostIdForEnvironmentIntent(deps, startContext.environmentIntent),
   });
   const claimedRow = args.claimed?.[0] ?? null;
   let startingThread: Thread | null;
@@ -765,6 +774,11 @@ async function admitPendingThread(
   try {
     startingThread = deps.db.transaction(
       (tx) => {
+        requireThreadRuntimeCapability(
+          deps,
+          args.thread.id,
+          hostIdForEnvironmentIntent(deps, startContext.environmentIntent),
+        );
         requireNoThreadConfigurationTransition(args.thread.id);
         requirePreparedThreadConfiguration(deps.db, args.thread.id);
         if (getThread(tx, args.thread.id)?.status !== args.thread.status) {

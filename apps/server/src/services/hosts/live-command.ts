@@ -27,6 +27,7 @@ interface RunLiveHostCommandArgs<TType extends HostDaemonSettledCommandType> {
   execution?: HostDaemonCommandExecutionRecord;
   hostId: string;
   timeoutMs: number;
+  requireNativeRuntime?: true;
 }
 
 interface LiveHostCommandErrorHandlerArgs<
@@ -233,6 +234,7 @@ export async function runLiveHostCommand<
       command: args.command,
       hostId: args.hostId,
       timeoutMs: args.timeoutMs,
+      ...(args.requireNativeRuntime ? { requireNativeRuntime: true } : {}),
     });
     await applyLiveHostCommandReport(deps, {
       command: args.command,

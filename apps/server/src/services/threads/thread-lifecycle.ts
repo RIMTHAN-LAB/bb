@@ -3,6 +3,10 @@ import { advanceEnvironmentProvisioning } from "../environments/environment-engi
 import { revokeThreadDesktopBrowserControl } from "../desktop-browsers.js";
 import { recordThreadConfigurationDelivery } from "./thread-provider-configuration.js";
 import {
+  getCurrentHostRuntimeSession,
+  requireNativeHostRuntime,
+} from "../hosts/runtime-capability.js";
+import {
   providerEnvironmentHasPendingWork,
   refreshProviderRetirement,
 } from "../environments/environment-engine.js";
@@ -1392,6 +1396,8 @@ export async function stopThreadForCurrentState(
   environment: RequestThreadStopForCurrentStateEnvironment | null,
   options?: { requireStopped: true },
 ): Promise<void> {
+  if (options?.requireStopped)
+    requireNativeHostRuntime(deps, environment?.hostId ?? null);
   await revokeThreadDesktopBrowserControl(deps, thread.id);
   const hasLiveRuntime =
     thread.status === "active" ||
@@ -1471,7 +1477,13 @@ async function runAwaitedThreadStopCommand(
   },
 ): Promise<void> {
   try {
-    const stopIdentity = JSON.stringify([args.hostId, args.command]);
+    if (args.requireStopped) requireNativeHostRuntime(deps, args.hostId);
+    const stopIdentity = JSON.stringify([
+      args.hostId,
+      args.command,
+      args.requireStopped === true,
+      getCurrentHostRuntimeSession(deps, args.hostId)?.id ?? null,
+    ]);
     await threadStopRequestDeduper.run(stopIdentity, async () => {
       if (!inFlightThreadRpcGuard.claim(args.threadId, "thread.stop"))
         throw new ApiError(
@@ -1484,6 +1496,7 @@ async function runAwaitedThreadStopCommand(
           command: args.command,
           hostId: args.hostId,
           timeoutMs: AWAITED_THREAD_STOP_TIMEOUT_MS,
+          ...(args.requireStopped ? { requireNativeRuntime: true } : {}),
         });
       } finally {
         inFlightThreadRpcGuard.release(args.threadId, "thread.stop");

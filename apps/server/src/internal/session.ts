@@ -28,6 +28,7 @@ import { readAttachment } from "../services/projects/attachments.js";
 import { handleHostSessionOpened } from "./session-owner-side-effects.js";
 import { resolveReportedConnectMachineId } from "./hosts.js";
 import type { PluginService } from "../services/plugins/plugin-service.js";
+import { requireDaemonThreadReportCapability } from "../services/hosts/runtime-capability.js";
 
 const sessionOpenCompatibilitySchema = z
   .object({
@@ -72,7 +73,10 @@ export function registerInternalSessionRoutes(
       hostId: compatibility.data.hostId,
     });
 
-    if (compatibility.data.protocolVersion !== HOST_DAEMON_PROTOCOL_VERSION) {
+    if (
+      compatibility.data.protocolVersion !== HOST_DAEMON_PROTOCOL_VERSION &&
+      compatibility.data.protocolVersion !== 203
+    ) {
       updateHost(deps.db, deps.hub, daemon.hostId, {
         lastRejectedProtocolVersion: compatibility.data.protocolVersion,
       });
@@ -106,6 +110,12 @@ export function registerInternalSessionRoutes(
       );
     }
     const payload = parsed.data;
+    requireDaemonThreadReportCapability(
+      deps.db,
+      daemon.hostId,
+      payload.protocolVersion,
+      payload.activeThreads.map(({ threadId }) => threadId),
+    );
 
     const host = getHost(deps.db, daemon.hostId);
     if (host?.phase === "suspending" || host?.phase === "suspended") {

@@ -47,6 +47,7 @@ import {
   seedThreadFixture,
   seedThread,
   seedThreadRuntimeState,
+  seedHostSession,
   seedTurnStarted,
 } from "../helpers/seed.js";
 import {
@@ -365,6 +366,7 @@ describe("legacy configuration adoption", () => {
   it("does not dedupe different host or environment release authorities", async () => {
     await withTestHarness(async (harness) => {
       const fixture = legacy(harness);
+      seedHostSession(harness.deps, { id: "different-host" });
       const first = stopThreadForCurrentState(
         harness.deps,
         fixture.thread,
@@ -1169,7 +1171,7 @@ describe("legacy configuration adoption", () => {
     });
   });
 
-  it("does not inherit swallowed best-effort stop failure as strict stopped authority", async () => {
+  it("refuses a strict caller joining a best-effort stop and retains the best-effort failure", async () => {
     await withTestHarness(async (harness) => {
       const fixture = legacy(harness);
       const bestEffort = stopThreadForCurrentState(
@@ -1197,8 +1199,8 @@ describe("legacy configuration adoption", () => {
       });
       await expect(bestEffort).resolves.toBeUndefined();
       const failed = await strict;
-      expect(failed.status).toBe(502);
-      expect(await failed.text()).toContain("host_unavailable");
+      expect(failed.status).toBe(409);
+      expect(await failed.text()).toContain("thread_stop_busy");
       expect(
         readThreadAdoptionReservation(harness.db, fixture.thread.id),
       ).toBeNull();

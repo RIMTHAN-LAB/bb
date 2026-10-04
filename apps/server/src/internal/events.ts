@@ -50,6 +50,7 @@ import {
 } from "../services/lib/error-log-fields.js";
 import { applyLoggedThreadLifecycleEvent } from "../services/threads/lifecycle-outcome.js";
 import { applyTurnCompletedEvent } from "./turn-completed-events.js";
+import { requireDaemonThreadReportCapability } from "../services/hosts/runtime-capability.js";
 import {
   getInactiveSessionLogFields,
   requireAuthenticatedDaemonSession,
@@ -907,6 +908,14 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
           hostId: session.hostId,
           events,
         });
+      const requireRuntime = () =>
+        requireDaemonThreadReportCapability(
+          deps.db,
+          session.hostId,
+          session.protocolVersion,
+          ownedEntries.map(({ envelope }) => envelope.threadId),
+        );
+      requireRuntime();
       const { entries, droppedLifecycleEvents } =
         dropInteractionLifecycleEvents(ownedEntries);
       if (droppedLifecycleEvents.length > 0) {
@@ -956,7 +965,26 @@ export function registerInternalEventRoutes(app: Hono, deps: AppDeps): void {
       let appendResult: AppendDaemonEventsResult;
       try {
         appendResult = deps.db.transaction(
-          (tx) => appendDaemonEventsInTransaction(tx, eventInputs),
+          (tx) => {
+            const current = resolvePostableEventBatchEntries(deps, {
+              hostId: session.hostId,
+              events: postableEvents,
+            });
+            if (
+              current.entries.length !== labelledEntries.length ||
+              current.entries.some(
+                (entry, index) =>
+                  entry.environmentId !== labelledEntries[index]?.environmentId,
+              )
+            )
+              throw new ApiError(
+                409,
+                "thread_not_owned_by_host",
+                "Thread ownership changed while validating daemon events",
+              );
+            requireRuntime();
+            return appendDaemonEventsInTransaction(tx, eventInputs);
+          },
           { behavior: "immediate" },
         );
       } catch (error) {
