@@ -27,6 +27,7 @@ import type {
 } from "@bb/host-daemon-contract";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
+import { requireThreadRuntimeCapability } from "../hosts/runtime-capability.js";
 import {
   appendThreadEventInTransaction,
   createClientTurnRequestId,
@@ -416,6 +417,7 @@ async function editThreadMessageWithGuard(
     thread: Thread;
   },
 ): Promise<EditMessageResponse> {
+  requireThreadRuntimeCapability(deps, args.thread.id, args.environment.hostId);
   requireNoThreadConfigurationTransition(args.thread.id);
   requireThreadAdoptionContextWritable(deps.db, args.thread.id);
   if (!deps.providerRegistry.supportsSessionRewind(args.thread.providerId)) {
@@ -539,6 +541,11 @@ async function editThreadMessageWithGuard(
       beforeAppendInTransaction: ({ tx }) => {
         requireNoThreadConfigurationTransition(editableThread.id);
         requireThreadAdoptionContextWritable(tx, editableThread.id);
+        requireThreadRuntimeCapability(
+          deps,
+          editableThread.id,
+          args.environment.hostId,
+        );
         if (getActivePendingInteractionForThread(tx, editableThread.id)) {
           conflict(
             "Resolve the pending interaction before editing the message",

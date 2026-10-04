@@ -41,6 +41,7 @@ import type { ProviderRegistryService } from "../providers/provider-registry.js"
 import { resolveProviderPlanCommand } from "../providers/provider-plan-command.js";
 import { workspaceContextFromPath } from "../environments/workspace-command-target.js";
 import { readThreadProviderConfiguration } from "./thread-provider-configuration.js";
+import { requireThreadRuntimeCapability } from "../hosts/runtime-capability.js";
 import {
   requireBridgeLaunchForProviderId,
   resolveBridgeLaunchForProviderId,
@@ -257,6 +258,7 @@ export async function buildExecutionOptions(
   request: ExecutionOptionsRequest,
   args: BuildExecutionOptionsArgs,
 ): Promise<ResolvedThreadExecutionOptions> {
+  requireThreadRuntimeCapability(deps, args.threadId, args.hostId);
   const plan = await resolveExistingThreadExecutionPlan(deps, {
     ...(args.projectDefaults !== undefined
       ? { projectDefaults: args.projectDefaults }

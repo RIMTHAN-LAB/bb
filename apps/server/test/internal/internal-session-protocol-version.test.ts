@@ -10,6 +10,49 @@ import {
 } from "../helpers/test-app.js";
 
 describe("internal session protocol version", () => {
+  it("admits only exact legacy protocol 203 after authenticating the host", async () => {
+    const server = await startTestServer();
+    try {
+      const hostId = "host-legacy-203";
+      upsertHost(server.db, server.hub, { id: hostId, name: "Legacy Host" });
+      const request = {
+        hostId,
+        instanceId: "legacy-instance",
+        hostName: "Legacy Host",
+        hasMachineCredential: false,
+        platform: "linux",
+        dataDir: "/tmp/legacy-203-data",
+        localApiPort: 38888,
+        protocolVersion: 203,
+        activeThreads: [],
+        loadedEnvironments: [],
+      };
+      const open = (body: unknown, keyHostId = hostId) =>
+        fetch(`${server.baseUrl}/internal/session/open`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${createTestDaemonHostKey({ hostId: keyHostId })}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+      expect((await open(request, "another-host")).status).toBe(403);
+      expect((await open({ ...request, unexpected: true })).status).toBe(400);
+      expect((await open({ ...request, protocolVersion: 202 })).status).toBe(
+        400,
+      );
+      expect((await open({ ...request, protocolVersion: 205 })).status).toBe(
+        400,
+      );
+      expect((await open(request)).status).toBe(201);
+      expect(
+        getHost(server.db, hostId)?.lastRejectedProtocolVersion,
+      ).toBeNull();
+    } finally {
+      await server.close();
+    }
+  });
+
   it.each(["suspending", "suspended"] as const)(
     "rejects a session open while the machine is %s",
     async (phase) => {
@@ -133,7 +176,7 @@ describe("internal session protocol version", () => {
         name: "Protocol Host",
       });
       const daemonClient = createHostDaemonClient(server.baseUrl, hostKey);
-      const staleProtocolVersion = HOST_DAEMON_PROTOCOL_VERSION - 1;
+      const staleProtocolVersion = HOST_DAEMON_PROTOCOL_VERSION + 1;
 
       const priorProtocolResponse = await fetch(
         `${server.baseUrl}/internal/session/open`,

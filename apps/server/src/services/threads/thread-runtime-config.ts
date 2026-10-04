@@ -1,4 +1,5 @@
 import { readThreadProviderConfiguration } from "./thread-provider-configuration.js";
+import { requireThreadRuntimeCapability } from "../hosts/runtime-capability.js";
 import {
   resolveHostEnvironment,
   mergeHostAndProviderEnvironment,
@@ -154,6 +155,7 @@ export async function resolveThreadRuntimeCommandConfig(
   deps: LoggedWorkSessionDeps,
   args: ResolveThreadRuntimeCommandConfigArgs,
 ): Promise<ResolvedThreadRuntimeCommandConfig> {
+  requireThreadRuntimeCapability(deps, args.thread.id, args.environment.hostId);
   const workspacePath = requireWorkspacePath(args.environment);
   const project = getProject(deps.db, args.thread.projectId);
   if (!project) {
@@ -192,6 +194,7 @@ export async function resolveThreadRuntimeCommandConfig(
     deps.db,
     args.thread.id,
   );
+  requireThreadRuntimeCapability(deps, args.thread.id, args.environment.hostId);
   const conditionalConfiguration = await resolvePluginAgentConfiguration({
     context: {
       thread: {

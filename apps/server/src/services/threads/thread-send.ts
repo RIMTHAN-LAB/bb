@@ -20,6 +20,7 @@ import type {
   LoggedPendingInteractionWorkSessionDeps,
 } from "../../types.js";
 import { ApiError } from "../../errors.js";
+import { requireThreadRuntimeCapability } from "../hosts/runtime-capability.js";
 import {
   addRequestIdToTurnSubmitCommandPayload,
   buildExecutionOptions,
@@ -414,6 +415,7 @@ export async function sendThreadMessage(
   deps: LoggedPendingInteractionWorkSessionDeps,
   args: SendThreadMessageArgs,
 ): Promise<void> {
+  requireThreadRuntimeCapability(deps, args.thread.id, args.environment.hostId);
   requireNoThreadConfigurationTransition(args.thread.id);
   requirePreparedThreadConfiguration(deps.db, args.thread.id);
   requireUnexpiredDispatchReservation(deps.db, args.thread.id);
@@ -488,6 +490,7 @@ async function sendThreadMessageWithoutContextClear(
   const beforeAppendInTransaction: SendThreadMessageTransactionPreflight = ({
     tx,
   }) => {
+    requireThreadRuntimeCapability(deps, thread.id, args.environment.hostId);
     requireNoThreadConfigurationTransition(thread.id);
     requirePreparedThreadConfiguration(tx, thread.id);
     requireUnexpiredDispatchReservation(tx, thread.id);

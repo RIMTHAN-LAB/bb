@@ -17,6 +17,7 @@ import {
 } from "@bb/db";
 import type { Environment, Thread, ThreadListEntry } from "@bb/domain";
 import { toEnvironmentResponse } from "../../services/environments/environment-response.js";
+import { getCurrentHostRuntimeSession } from "../../services/hosts/runtime-capability.js";
 import {
   threadIncludeOptionSchema,
   THREAD_COUNT_ROOT_PARENT,
@@ -123,8 +124,11 @@ function buildThreadResponse(
     response.environment = environment;
   }
   if (args.includes.has("host")) {
-    response.host = environment
+    const host = environment
       ? getNonDestroyedHostWithStatus(deps, environment.hostId)
+      : null;
+    response.host = host
+      ? { ...host, runtimeSession: getCurrentHostRuntimeSession(deps, host.id) }
       : null;
   }
   return response;

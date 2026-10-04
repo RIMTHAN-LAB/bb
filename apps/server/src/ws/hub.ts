@@ -714,6 +714,7 @@ export class NotificationHub implements DbNotifier {
     hostId: string;
     message: HostDaemonOnlineRpcRequestMessage;
     timeoutMs: number;
+    validateSession?: (sessionId: string) => void;
   }): Promise<HostDaemonOnlineRpcResponseMessage> {
     const sessionId = this.daemonSessionIdsByHost.get(args.hostId);
     if (!sessionId) {
@@ -723,6 +724,7 @@ export class NotificationHub implements DbNotifier {
     if (!session) {
       return Promise.reject(new HostOnlineRpcUnavailableError());
     }
+    args.validateSession?.(sessionId);
 
     return new Promise<HostDaemonOnlineRpcResponseMessage>(
       (resolve, reject) => {

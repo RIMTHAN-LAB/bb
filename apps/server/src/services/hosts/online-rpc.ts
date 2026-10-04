@@ -18,6 +18,7 @@ import {
 } from "../../ws/hub.js";
 import { ensureHostSessionReadyForWork } from "./host-lifecycle.js";
 import { inactiveHostUnavailableDetails } from "../lib/lifecycle-api-errors.js";
+import { requireHostCommandRuntimeCapability } from "./runtime-capability.js";
 
 const HOST_DAEMON_REGISTRATION_WAIT_MS = 1_000;
 
@@ -25,6 +26,7 @@ interface CallHostOnlineRpcArgs<TCommand extends HostDaemonRpcCommand> {
   command: TCommand;
   hostId: string;
   timeoutMs: number;
+  requireNativeRuntime?: true;
 }
 
 interface CallHostRetryableOnlineRpcArgs<
@@ -47,6 +49,7 @@ export async function callHostOnlineRpc(
   return callHostOnlineRpcWithRetry(deps, args, {
     retryOnTransportFailure: false,
     waitForTransportFailure: false,
+    allowStaleReadLease: true,
   });
 }
 
@@ -62,6 +65,7 @@ export async function callHostOnlineRpcForWork(
   return callHostOnlineRpcWithRetry(deps, args, {
     retryOnTransportFailure: false,
     waitForTransportFailure: false,
+    allowStaleReadLease: false,
   });
 }
 
@@ -79,6 +83,7 @@ export async function callHostRetryableOnlineRpc(
   return callHostOnlineRpcWithRetry(deps, args, {
     retryOnTransportFailure: true,
     waitForTransportFailure: false,
+    allowStaleReadLease: true,
   });
 }
 
@@ -96,6 +101,7 @@ export async function callHostRetryableOnlineRpcForWork(
   return callHostOnlineRpcWithRetry(deps, args, {
     retryOnTransportFailure: true,
     waitForTransportFailure: true,
+    allowStaleReadLease: false,
   });
 }
 
@@ -176,6 +182,7 @@ async function callHostOnlineRpcWithRetry(
   options: {
     retryOnTransportFailure: false;
     waitForTransportFailure: false;
+    allowStaleReadLease: boolean;
   },
 ): Promise<HostDaemonRpcResultForCommand>;
 async function callHostOnlineRpcWithRetry(
@@ -184,6 +191,7 @@ async function callHostOnlineRpcWithRetry(
   options: {
     retryOnTransportFailure: true;
     waitForTransportFailure: boolean;
+    allowStaleReadLease: boolean;
   },
 ): Promise<HostDaemonOnlineRpcResultForCommand>;
 async function callHostOnlineRpcWithRetry(
@@ -192,6 +200,7 @@ async function callHostOnlineRpcWithRetry(
   options: {
     retryOnTransportFailure: boolean;
     waitForTransportFailure: boolean;
+    allowStaleReadLease: boolean;
   },
 ): Promise<HostDaemonRpcResultForCommand> {
   const timeoutRetryDeadline =
@@ -208,6 +217,7 @@ async function callHostOnlineRpcWithRetry(
   const response = await requestHostOnlineRpcResponse(
     deps,
     firstAttemptArgs,
+    options.allowStaleReadLease,
   ).catch(async (error) => {
     if (!options.retryOnTransportFailure) {
       throwOnlineRpcError(error);
@@ -215,7 +225,11 @@ async function callHostOnlineRpcWithRetry(
     if (error instanceof HostOnlineRpcUnavailableError) {
       if (!options.waitForTransportFailure) throwOnlineRpcError(error);
       await waitForRetryableHostRpcTransport(deps, args.hostId);
-      return requestHostOnlineRpcResponse(deps, args).catch((retryError) => {
+      return requestHostOnlineRpcResponse(
+        deps,
+        args,
+        options.allowStaleReadLease,
+      ).catch((retryError) => {
         throwOnlineRpcError(retryError);
       });
     }
@@ -227,10 +241,14 @@ async function callHostOnlineRpcWithRetry(
     if (retryTimeoutMs <= 0) {
       throwOnlineRpcError(error);
     }
-    return requestHostOnlineRpcResponse(deps, {
-      ...args,
-      timeoutMs: retryTimeoutMs,
-    }).catch((retryError) => {
+    return requestHostOnlineRpcResponse(
+      deps,
+      {
+        ...args,
+        timeoutMs: retryTimeoutMs,
+      },
+      options.allowStaleReadLease,
+    ).catch((retryError) => {
       throwOnlineRpcError(retryError);
     });
   });
@@ -271,8 +289,9 @@ export function isHostUnavailableApiError(error: unknown): boolean {
 }
 
 function requestHostOnlineRpcResponse(
-  deps: Pick<WorkSessionDeps, "hub">,
+  deps: Pick<WorkSessionDeps, "db" | "hub">,
   args: CallHostOnlineRpcArgs<HostDaemonRpcCommand>,
+  allowStaleReadLease: boolean,
 ): Promise<HostDaemonOnlineRpcResponseMessage> {
   return deps.hub.requestHostOnlineRpc({
     hostId: args.hostId,
@@ -282,6 +301,15 @@ function requestHostOnlineRpcResponse(
       command: args.command,
     },
     timeoutMs: args.timeoutMs,
+    validateSession: (sessionId) =>
+      requireHostCommandRuntimeCapability(
+        deps,
+        args.hostId,
+        sessionId,
+        args.command,
+        args.requireNativeRuntime,
+        allowStaleReadLease,
+      ),
   });
 }
 

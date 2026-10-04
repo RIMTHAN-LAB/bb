@@ -16,6 +16,8 @@ import {
 } from "@bb/domain";
 import { ApiError } from "../../errors.js";
 import type { ProviderRegistryService } from "../providers/provider-registry.js";
+import type { NotificationHub } from "../../ws/hub.js";
+import { requireThreadNativeHostRuntime } from "../hosts/runtime-capability.js";
 import {
   readThreadAdoptionReservation,
   requireThreadAdoptionAttempt,
@@ -53,14 +55,20 @@ export function readThreadConfigurationDelivery(
 }
 
 export function setThreadProviderConfiguration(
-  deps: { db: DbConnection; providerRegistry: ProviderRegistryService },
+  deps: {
+    db: DbConnection;
+    hub: Pick<NotificationHub, "getDaemonSessionIdForHost">;
+    providerRegistry: ProviderRegistryService;
+  },
   threadId: string,
   patch: {
     nativeContext?: NativeContext;
     configurationGeneration?: number;
     adoptionAttemptId?: string;
   },
+  hostId?: string | null,
 ): void {
+  requireThreadNativeHostRuntime(deps, threadId, hostId);
   deps.db.transaction(
     (tx) => {
       const thread = getThread(tx, threadId);

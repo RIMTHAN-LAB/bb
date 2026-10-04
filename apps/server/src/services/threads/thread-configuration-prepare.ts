@@ -32,6 +32,7 @@ import {
   stopThreadForCurrentState,
 } from "./thread-lifecycle.js";
 import { callHostOnlineRpcForWork } from "../hosts/online-rpc.js";
+import { requireThreadNativeHostRuntime } from "../hosts/runtime-capability.js";
 import { attemptDispatch } from "./dispatch-attempt.js";
 import {
   recordThreadConfigurationDelivery,
@@ -55,6 +56,7 @@ export async function prepareThreadConfiguration(
   threadId: string,
   request: PrepareThreadConfigurationRequest,
 ): Promise<void> {
+  requireThreadNativeHostRuntime(deps, threadId);
   const adoption = requireThreadAdoptionAttempt(
     deps.db,
     threadId,
@@ -135,6 +137,7 @@ export async function prepareThreadConfiguration(
           resumeContext: prepared.resumeContext,
         },
       });
+      requireThreadNativeHostRuntime(deps, threadId);
       requireThreadAdoptionAttempt(
         deps.db,
         threadId,
@@ -257,6 +260,7 @@ export async function updateThreadProviderConfiguration(
     adoptionAttemptId?: string;
   },
 ): Promise<void> {
+  requireThreadNativeHostRuntime(deps, threadId);
   requireNoThreadConfigurationTransition(threadId);
   if (
     requireThreadAdoptionAttempt(deps.db, threadId, patch.adoptionAttemptId) !==
@@ -350,6 +354,7 @@ export async function updateThreadProviderConfiguration(
           "configuration_generation_stale",
           "Configuration changed during provider release",
         );
+      requireThreadNativeHostRuntime(deps, threadId);
       recordThreadConfigurationRelease(deps.db, threadId, {
         generation: previous.generation,
         releasedProviderSessionId: providerSessionId,
@@ -367,6 +372,7 @@ export async function releaseThreadConfiguration(
   threadId: string,
   request: ReleaseThreadConfigurationRequest,
 ): Promise<void> {
+  requireThreadNativeHostRuntime(deps, threadId);
   if ("expectedProviderSessionId" in request) {
     await releaseUnmanagedThreadConfiguration(deps, threadId, request);
     return;
@@ -461,6 +467,7 @@ export async function releaseThreadConfiguration(
       );
     deps.db.transaction(
       (tx) => {
+        requireThreadNativeHostRuntime(deps, threadId);
         if (adoption !== null) {
           requireAdoptionQuiescent(deps, tx, threadId, true);
           if (
@@ -633,6 +640,7 @@ async function releaseUnmanagedThreadConfiguration(
       );
       deps.db.transaction(
         (tx) => {
+          requireThreadNativeHostRuntime(deps, threadId);
           const current = requireAdoptionQuiescent(
             deps,
             tx,

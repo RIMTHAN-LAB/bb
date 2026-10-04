@@ -19,6 +19,8 @@ import type {
 } from "../../types.js";
 import { ApiError } from "../../errors.js";
 import { ensureHostSessionReadyForWork } from "../hosts/host-lifecycle.js";
+import { requireNativeHostRuntime } from "../hosts/runtime-capability.js";
+import { requireThreadRuntimeCapability } from "../hosts/runtime-capability.js";
 import { buildExecutionOptions } from "./thread-commands.js";
 import {
   copyForkSourceHistory,
@@ -345,15 +347,32 @@ async function createPendingThreadAndAttemptFirstDispatch(
     sendAt: number | undefined;
   },
 ) {
+  if (
+    args.request.nativeContext !== undefined ||
+    args.request.configurationGeneration !== undefined
+  )
+    requireNativeHostRuntime(
+      deps,
+      hostIdForEnvironmentIntent(deps, args.environmentIntent),
+    );
   const environment =
     args.environmentId === null
       ? null
       : getEnvironment(deps.db, args.environmentId);
-  const create = () =>
-    createThreadRecord(deps, {
+  const create = () => {
+    if (
+      args.request.nativeContext !== undefined ||
+      args.request.configurationGeneration !== undefined
+    )
+      requireNativeHostRuntime(
+        deps,
+        hostIdForEnvironmentIntent(deps, args.environmentIntent),
+      );
+    return createThreadRecord(deps, {
       request: args.request,
       environmentId: args.environmentId,
     });
+  };
   const thread =
     environment === null
       ? create()
@@ -368,7 +387,12 @@ async function createPendingThreadAndAttemptFirstDispatch(
       args.request.nativeContext !== undefined ||
       args.request.configurationGeneration !== undefined
     ) {
-      setThreadProviderConfiguration(deps, thread.id, args.request);
+      setThreadProviderConfiguration(
+        deps,
+        thread.id,
+        args.request,
+        hostIdForEnvironmentIntent(deps, args.environmentIntent),
+      );
     }
     if (
       args.fork !== null &&
@@ -390,6 +414,11 @@ async function createPendingThreadAndAttemptFirstDispatch(
       deps,
       args.request,
       executionPlanArgs,
+    );
+    requireThreadRuntimeCapability(
+      deps,
+      thread.id,
+      hostIdForEnvironmentIntent(deps, args.environmentIntent),
     );
 
     const startContext: PendingThreadStartContext = {
@@ -678,6 +707,11 @@ export async function createThreadFromRequest(
           ? request.environment.machine.hostId
           : null
         : null;
+  if (
+    request.nativeContext !== undefined ||
+    request.configurationGeneration !== undefined
+  )
+    requireNativeHostRuntime(deps, childHostId);
   assertForkSourceHost(deps, {
     childHostId,
     originKind: request.originKind ?? null,
