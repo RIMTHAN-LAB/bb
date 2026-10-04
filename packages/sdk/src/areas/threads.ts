@@ -18,6 +18,8 @@ import {
 import type {
   CreateQueuedMessageRequest,
   CreateThreadRequest,
+  PrepareThreadConfigurationRequest,
+  ReleaseThreadConfigurationRequest,
   QueuedMessageListQuery,
   EditMessageRequest,
   EditMessageResponse,
@@ -202,8 +204,7 @@ export type ThreadStorageFilesResult = ThreadStorageFileListResponse;
 export type ThreadStorageLocationResult = ThreadStorageLocationResponse;
 export type ThreadStoragePathsResult = ThreadStoragePathListResponse;
 export type ThreadChildSummaryResult = ThreadChildSummaryResponse;
-export type ThreadDefaultExecutionOptionsResult =
-  ResolvedThreadExecutionOptions | null;
+export type ThreadDefaultExecutionOptionsResult = ResolvedThreadExecutionOptions | null;
 export type ThreadConversationOutlineResult = ThreadConversationOutlineResponse;
 export type ThreadTimelineTurnSummaryDetailsResult =
   TimelineTurnSummaryDetailsResponse;
@@ -238,6 +239,9 @@ export interface ThreadForkArgs extends Omit<
 }
 
 export interface ThreadUpdateArgs extends UpdateThreadRequest {
+  threadId: string;
+}
+export interface ThreadPrepareConfigurationArgs extends PrepareThreadConfigurationRequest {
   threadId: string;
 }
 
@@ -572,6 +576,14 @@ export interface ThreadsArea {
   search(args: ThreadSearchArgs): Promise<ThreadSearchResult>;
   send(args: ThreadSendArgs): Promise<ThreadSendResult>;
   spawn(args: ThreadSpawnArgs): Promise<ThreadSpawnResult>;
+  /** Release the exact idle native session; blocks dispatch until an advanced generation is prepared. */
+  releaseConfiguration(
+    args: ReleaseThreadConfigurationRequest & { threadId: string },
+  ): Promise<ThreadMutationResult>;
+  /** Construct or restore an exact provider session and read back configuration without a model turn. */
+  prepareConfiguration(
+    args: ThreadPrepareConfigurationArgs,
+  ): Promise<ThreadMutationResult>;
   stop(args: ThreadActionArgs): Promise<ThreadStopResult>;
   tabs: ThreadTabsArea;
   timeline(args: ThreadTimelineArgs): Promise<ThreadTimelineResult>;
@@ -1228,6 +1240,24 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
         transport.api.v1.threads[":id"].retry.$post({
           param: { id: input.threadId },
           json: retryJson(input),
+        }),
+      );
+    },
+    async releaseConfiguration(input) {
+      const { threadId, ...json } = input;
+      return transport.readJson(
+        transport.api.v1.threads[":id"].configuration.release.$post({
+          param: { id: threadId },
+          json,
+        }),
+      );
+    },
+    async prepareConfiguration(input) {
+      const { threadId, ...json } = input;
+      return transport.readJson(
+        transport.api.v1.threads[":id"].configuration.prepare.$post({
+          param: { id: threadId },
+          json,
         }),
       );
     },

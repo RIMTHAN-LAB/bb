@@ -87,6 +87,7 @@ import type {
   CreateQueuedMessageRequest,
   CreateThreadSectionRequest,
   CreateThreadRequest,
+  PrepareThreadConfigurationRequest,
   EditMessageRequest,
   EditMessageResponse,
   ForkThreadRequest,
@@ -284,6 +285,9 @@ import {
   queuedMessageListQuerySchema,
   updateQueuedMessageRequestSchema,
   createThreadRequestSchema,
+  prepareThreadConfigurationRequestSchema,
+  releaseThreadConfigurationRequestSchema,
+  type ReleaseThreadConfigurationRequest,
   forkThreadRequestSchema,
   deleteThreadRequestSchema,
   environmentActionRequestSchema,
@@ -1161,6 +1165,22 @@ export const publicApiRoutes = {
         createThreadRequestSchema,
       ),
       response: jsonResponse<ThreadResponse>({ status: 201 }),
+    }),
+    releaseConfiguration: defineRoute({
+      path: "/threads/:id/configuration/release",
+      method: "post",
+      request: jsonRequest<PathId, ReleaseThreadConfigurationRequest>(
+        releaseThreadConfigurationRequestSchema,
+      ),
+      response: jsonResponse<ThreadResponse>(),
+    }),
+    prepareConfiguration: defineRoute({
+      path: "/threads/:id/configuration/prepare",
+      method: "post",
+      request: jsonRequest<PathId, PrepareThreadConfigurationRequest>(
+        prepareThreadConfigurationRequestSchema,
+      ),
+      response: jsonResponse<ThreadResponse>(),
     }),
     fork: defineRoute({
       path: "/threads/fork",

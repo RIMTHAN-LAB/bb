@@ -29,6 +29,8 @@ interface ResolveWorkspaceForCommandArgs {
   requireGit?: boolean;
   runtimeManager: RuntimeManager;
   targetThreadId?: string;
+  configurationGeneration?: number;
+  nativeContext?: { homePath: string };
   workspaceContext: WorkspaceContext;
 }
 
@@ -113,6 +115,8 @@ export async function resolveWorkspaceForCommand(
       {
         dataDir: args.dataDir,
         environmentId: args.environmentId,
+        configurationGeneration: args.configurationGeneration,
+        nativeContext: args.nativeContext,
         ...(args.injectedSkillSources !== undefined
           ? { injectedSkillSources: args.injectedSkillSources }
           : {}),

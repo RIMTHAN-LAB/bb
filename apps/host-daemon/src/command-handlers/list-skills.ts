@@ -63,7 +63,7 @@ function classifySkillRoot(
   if (root.source !== "skill") {
     return null;
   }
-  if (root.namePrefix !== "") {
+  if (root.namePrefix !== "" || root.origin === "plugin") {
     const rootPath = "rootPath" in root ? root.rootPath : root.filePath;
     return {
       identitySeed: `plugin:${resolution.providerId}:${root.namePrefix}:${rootPath}`,

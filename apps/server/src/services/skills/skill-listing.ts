@@ -1,3 +1,5 @@
+import { getThread } from "@bb/db";
+import { readThreadProviderConfiguration } from "../threads/thread-provider-configuration.js";
 import { Buffer } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
@@ -216,9 +218,21 @@ export async function listProjectSkills(
   deps: AppDeps,
   args: { workspace: CommandWorkspace },
 ): Promise<SkillSummary[]> {
+  const exactThread =
+    args.workspace.threadId === undefined
+      ? null
+      : getThread(deps.db, args.workspace.threadId);
+  const nativeContext =
+    exactThread === null
+      ? undefined
+      : readThreadProviderConfiguration(deps.db, exactThread.id)?.nativeContext;
   const skillProviders = deps.providerRegistry
     .list()
-    .filter(providerHasNativeRootSurface);
+    .filter(providerHasNativeRootSurface)
+    .filter(
+      (registration) =>
+        exactThread === null || registration.info.id === exactThread.providerId,
+    );
   const [perProvider, sharedSkills] = await Promise.all([
     Promise.all(
       skillProviders.map(
@@ -228,6 +242,9 @@ export async function listProjectSkills(
             registration,
             hostId: args.workspace.hostId,
             cwd: args.workspace.cwd,
+            ...(exactThread === null
+              ? {}
+              : { threadId: exactThread.id, nativeContext }),
           });
           return { provider: registration.info.id, skills: result.skills };
         },

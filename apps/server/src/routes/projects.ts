@@ -714,6 +714,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
 
     const workspace = resolveProjectCommandWorkspace(deps, {
       projectId,
+      ...(query.threadId === undefined ? {} : { threadId: query.threadId }),
       ...(query.environmentId !== null
         ? { environmentId: query.environmentId }
         : {}),
@@ -745,6 +746,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
 
     const workspace = resolveProjectCommandWorkspace(deps, {
       projectId,
+      ...(query.threadId === undefined ? {} : { threadId: query.threadId }),
       ...(query.environmentId !== null
         ? { environmentId: query.environmentId }
         : {}),
@@ -763,6 +765,7 @@ export function registerProjectRoutes(app: Hono, deps: AppDeps): void {
 
     const workspace = resolveProjectCommandWorkspace(deps, {
       projectId,
+      ...(query.threadId === undefined ? {} : { threadId: query.threadId }),
       ...(query.environmentId !== null
         ? { environmentId: query.environmentId }
         : {}),

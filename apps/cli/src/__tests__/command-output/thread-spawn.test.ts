@@ -22,6 +22,64 @@ describe("bb thread spawn command output", () => {
     return vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   }
 
+  it("reserves a pending thread without an initial input when --defer-dispatch is selected", async () => {
+    const thread = fixtures.makeThread({
+      id: "thread-reserved",
+      projectId: "proj-1",
+      providerId: "codex",
+      status: "pending",
+    });
+    const post = vi.fn(async () => thread);
+    stubServerApi({ "v1.threads.$post": post });
+    await runCommand(
+      ["thread", "spawn", "--project", "proj-1", "--defer-dispatch", "--json"],
+      register,
+    );
+    expect(post).toHaveBeenCalledWith({
+      json: {
+        origin: "cli",
+        startedOnBehalfOf: null,
+        originKind: null,
+        projectId: "proj-1",
+        input: [],
+        dispatch: "deferred",
+        environment: { type: "project-default" },
+      },
+    });
+    expect(collectLogLines(vi.mocked(console.log))).toContain(
+      JSON.stringify(thread, null, 2),
+    );
+    expect(resolveLocalHostIdMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["--prompt", "hidden work"],
+    ["--plan"],
+    ["--file", "/tmp/input"],
+    ["--image", "/tmp/image"],
+    ["--send-at", "10m"],
+  ])("refuses initial work in deferred mode: %s", async (...flags) => {
+    const post = vi.fn();
+    stubServerApi({ "v1.threads.$post": post });
+    await expect(
+      runCommand(
+        [
+          "thread",
+          "spawn",
+          "--project",
+          "proj-1",
+          "--defer-dispatch",
+          "--environment",
+          "/tmp/work",
+          ...flags,
+        ],
+        register,
+      ),
+    ).rejects.toThrow("process.exit:1");
+    expect(post).not.toHaveBeenCalled();
+    expect(resolveLocalHostIdMock).not.toHaveBeenCalled();
+  });
+
   it("bb thread spawn sends project-default when the user relies on project defaults", async () => {
     vi.stubEnv("BB_PROJECT_ID", "proj-1");
     const thread: domain.Thread = fixtures.makeThread({
@@ -334,7 +392,9 @@ describe("bb thread spawn command output", () => {
     expect(helpOutput).toContain("--permission-mode <mode>");
     expect(helpOutput).toContain("--visibility <visibility>");
     expect(helpOutput).toContain("Exact Git ref");
-    expect(helpOutput).toContain("origin/<branch> for a remote ref");
+    expect(helpOutput.replace(/\s+/g, " ")).toContain(
+      "origin/<branch> for a remote ref",
+    );
     expect(helpOutput).toContain("bb environment providers");
     expect(helpOutput).not.toContain("bb curl");
     expect(helpOutput).toMatch(/Permission mode: accept-edits, auto, or full/);

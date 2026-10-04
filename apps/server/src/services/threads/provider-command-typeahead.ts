@@ -78,6 +78,8 @@ function commandOriginRank(command: ProviderCommand): number {
       return 1;
     case "user":
       return 0;
+    case "plugin":
+      return -1;
   }
 }
 

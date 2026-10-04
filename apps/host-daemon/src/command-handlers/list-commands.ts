@@ -25,7 +25,7 @@ export interface DeclaredScanRootResolution {
   nativeRoots: ProviderNativeRootSet;
 }
 
-type RootOrigin = "project" | "user";
+type RootOrigin = "project" | "user" | "plugin";
 type RootSide = "skills" | "commands";
 
 interface ProjectAncestors {

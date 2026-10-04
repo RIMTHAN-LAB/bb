@@ -173,6 +173,7 @@ const WORKSPACE_DIFF_AVAILABLE_RESULT: JsonObject = {
 };
 
 const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
+  "thread.configuration.prepare": { providerThreadId: "provider-thread" },
   "environment.hook.run": {},
   "environment.hook.cancel": { status: "terminated" },
   "desktop.browser.list_instances": { instances: [] },
@@ -684,6 +685,35 @@ function terminalDataBase64(byteLength: number): string {
 }
 
 const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
+  "hostDaemonCommandSchema.configurationGeneration":
+    "Legacy unmanaged threads omit generation; managed threads carry the persisted numeric configuration fence.",
+  "hostDaemonCommandSchema.nativeContext":
+    "Legacy providers omit an exact native profile; managed supported providers receive their persisted profile context.",
+  "hostDaemonCommandSchema.nativeContext.instructionsConfig":
+    "A native profile may have no protected instruction contribution.",
+  "hostDaemonCommandSchema.nativeContext.mcpConfig":
+    "A native profile may have no protected MCP connection file.",
+  "hostDaemonCommandSchema.resumeContext.configurationGeneration":
+    "Legacy unmanaged resume context omits the managed configuration fence.",
+  "hostDaemonCommandSchema.resumeContext.nativeContext":
+    "Legacy resume context may have no managed native profile.",
+  "hostDaemonCommandSchema.resumeContext.nativeContext.instructionsConfig":
+    "A resumed native profile may have no protected instruction contribution.",
+  "hostDaemonCommandSchema.resumeContext.nativeContext.mcpConfig":
+    "A resumed native profile may have no protected MCP connection file.",
+  "hostDaemonOnlineRpcCommandSchema.options.promptMode":
+    "Configuration prepare preserves declared prompt modes when present; absence uses the provider default.",
+  "hostDaemonOnlineRpcCommandSchema.resumeContext.configurationGeneration":
+    "Legacy online resume context omits the managed configuration fence.",
+  "hostDaemonOnlineRpcCommandSchema.resumeContext.disallowedTools":
+    "Online prepare may omit provider-specific built-in tool removals.",
+  "hostDaemonOnlineRpcCommandSchema.resumeContext.nativeContext":
+    "Legacy online prepare may have no managed native profile.",
+  "hostDaemonOnlineRpcCommandSchema.resumeContext.nativeContext.instructionsConfig":
+    "An online prepared native profile may have no protected instruction contribution.",
+  "hostDaemonOnlineRpcCommandSchema.resumeContext.nativeContext.mcpConfig":
+    "An online prepared native profile may have no protected MCP connection file.",
+
   "hostDaemonCommandSchema.targetPath":
     "project.clone omits targetPath when the daemon should derive its default checkout location for the project.",
   "hostDaemonOnlineRpcCommandSchema.expectedSha256":
@@ -999,7 +1029,7 @@ const CONTRIBUTED_ENV = [
 
 describe("host-daemon command schemas", () => {
   it("uses the current host-daemon protocol version", () => {
-    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(203);
+    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(204);
     expect(HOST_ARTIFACT_MAX_BYTES).toBe(256 * 1024 * 1024);
   });
 

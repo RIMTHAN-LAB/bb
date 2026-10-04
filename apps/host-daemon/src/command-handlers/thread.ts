@@ -1,5 +1,10 @@
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import type { PromptInput } from "@bb/domain";
+import {
+  UNAVAILABLE_PROVIDER_CONFIGURATION_READBACK,
+  type ProviderConfigurationReadback,
+} from "@bb/domain";
 import type { HostDaemonCommandResult } from "@bb/host-daemon-contract";
 import { resolveContainedPath } from "@bb/process-utils";
 import type { RuntimeEntry } from "../runtime-manager.js";
@@ -20,10 +25,53 @@ import { requireResolvedWorkspaceForCommand } from "../workspace-resolution.js";
 type TurnSubmitCommand = CommandOf<"turn.submit">;
 type ExistingThreadRuntimeCommand =
   | TurnSubmitCommand
-  | CommandOf<"thread.goal.clear">;
+  | CommandOf<"thread.goal.clear">
+  | CommandOf<"thread.configuration.prepare">;
 
 const TURN_SUBMIT_ACTIVE_TURN_WAIT_MS = 5_000;
 const TURN_SUBMIT_STEER_ATTEMPTS = 2;
+
+function recordConfigurationDelivery(
+  entry: RuntimeEntry,
+  args: {
+    threadId: string;
+    providerId: string;
+    providerSessionId: string;
+    providerInstanceId?: string;
+    instructions: string;
+    dynamicTools: readonly { name: string }[];
+    nativeContext?: { homePath: string };
+    providerReadback?: ProviderConfigurationReadback;
+  },
+): void {
+  if (
+    entry.configurationGeneration === undefined ||
+    entry.skillCatalogHash === null
+  )
+    return;
+  entry.configurationDeliveries?.set(args.threadId, {
+    status: "delivered",
+    threadId: args.threadId,
+    providerId: args.providerId,
+    providerSessionId: args.providerSessionId,
+    ...(args.providerInstanceId === undefined
+      ? {}
+      : { providerInstanceId: args.providerInstanceId }),
+    generation: entry.configurationGeneration,
+    catalogHash: entry.skillCatalogHash,
+    sourceTreeHashes: [...(entry.sourceTreeHashes ?? [])],
+    toolNames: args.dynamicTools.map((tool) => tool.name),
+    instructionsDigest: createHash("sha256")
+      .update(args.instructions)
+      .digest("hex"),
+    deliveredAt: Date.now(),
+    ...(args.nativeContext === undefined
+      ? {}
+      : { nativeContext: args.nativeContext }),
+    providerReadback:
+      args.providerReadback ?? UNAVAILABLE_PROVIDER_CONFIGURATION_READBACK,
+  });
+}
 
 interface ResumeThreadRuntimeIfMissingArgs {
   command: ExistingThreadRuntimeCommand;
@@ -189,7 +237,7 @@ async function resumeThreadRuntimeIfMissing(
     command.resumeContext.bridgeLaunch ?? command.bridgeLaunch,
     options,
   );
-  await entry.runtime.resumeThread({
+  const resumed = await entry.runtime.resumeThread({
     bridgeLaunch,
     environmentId: command.environmentId,
     threadId: command.threadId,
@@ -202,6 +250,16 @@ async function resumeThreadRuntimeIfMissing(
     dynamicTools: resumeContext.dynamicTools,
     disallowedTools: resumeContext.disallowedTools,
     instructionMode: resumeContext.instructionMode,
+  });
+  recordConfigurationDelivery(entry, {
+    threadId: command.threadId,
+    providerId: resumeContext.providerId,
+    providerSessionId: resumed.providerThreadId,
+    instructions: resumeContext.instructions,
+    dynamicTools: resumeContext.dynamicTools,
+    nativeContext: resumeContext.nativeContext,
+    providerReadback: resumed.providerReadback,
+    providerInstanceId: resumed.providerInstanceId,
   });
 }
 
@@ -234,6 +292,8 @@ export async function startThread(
       injectedSkillSources: command.injectedSkillSources,
       runtimeManager: options.runtimeManager,
       targetThreadId: command.threadId,
+      configurationGeneration: command.configurationGeneration,
+      nativeContext: command.nativeContext,
       workspaceContext: command.workspaceContext,
     });
     const result = await entry.runtime.startThread({
@@ -255,7 +315,21 @@ export async function startThread(
       instructionMode: command.instructionMode,
       ...(command.fork ? { fork: command.fork } : {}),
     });
-    return result;
+    recordConfigurationDelivery(entry, {
+      threadId: command.threadId,
+      providerId: command.providerId,
+      providerSessionId: result.providerThreadId,
+      instructions: command.instructions,
+      dynamicTools: command.dynamicTools,
+      nativeContext: command.nativeContext,
+      providerReadback: result.providerReadback,
+      providerInstanceId: result.providerInstanceId,
+    });
+    const delivery = entry.configurationDeliveries?.get(command.threadId);
+    return {
+      ...result,
+      ...(delivery === undefined ? {} : { configurationDelivery: delivery }),
+    };
   } catch (error) {
     await cleanupAfterPostStagingFailure(staged.cleanup);
     throw error;
@@ -277,6 +351,8 @@ export async function prepareThreadRewind(
     injectedSkillSources: command.injectedSkillSources,
     runtimeManager: options.runtimeManager,
     targetThreadId: command.threadId,
+    configurationGeneration: command.configurationGeneration,
+    nativeContext: command.nativeContext,
     workspaceContext: command.workspaceContext,
   });
   return entry.runtime.prepareThreadRewind({
@@ -301,7 +377,10 @@ export async function discardThreadRewind(
   command: CommandOf<"thread.rewind.discard">,
   options: CommandDispatchOptions,
 ): Promise<HostDaemonCommandResult<"thread.rewind.discard">> {
-  const entry = await options.runtimeManager.getOrAwait(command.environmentId);
+  const entry = options.runtimeManager.getForThread(
+    command.environmentId,
+    command.threadId,
+  );
   if (!entry) {
     return {};
   }
@@ -320,6 +399,8 @@ export async function ensureThreadRuntime(
     injectedSkillSources: resumeContext.injectedSkillSources,
     runtimeManager: options.runtimeManager,
     targetThreadId: command.threadId,
+    configurationGeneration: resumeContext.configurationGeneration,
+    nativeContext: resumeContext.nativeContext,
     workspaceContext: resumeContext.workspaceContext,
   });
 
@@ -355,7 +436,11 @@ async function runSubmittedTurn(
     contributedEnv: command.resumeContext.contributedEnv,
     instructions: command.resumeContext.instructions,
   });
-  return { appliedAs: "new-turn" };
+  const delivery = entry.configurationDeliveries?.get(command.threadId);
+  return {
+    appliedAs: "new-turn",
+    ...(delivery === undefined ? {} : { configurationDelivery: delivery }),
+  };
 }
 
 async function steerSubmittedTurn(
@@ -380,7 +465,11 @@ async function steerSubmittedTurn(
     });
 
     if (result.status === "steered") {
-      return { appliedAs: "steer" };
+      const delivery = entry.configurationDeliveries?.get(command.threadId);
+      return {
+        appliedAs: "steer",
+        ...(delivery === undefined ? {} : { configurationDelivery: delivery }),
+      };
     }
     activeTurnId = result.activeTurnId;
     if (attempt === TURN_SUBMIT_STEER_ATTEMPTS - 1) {

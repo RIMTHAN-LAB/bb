@@ -1387,3 +1387,25 @@ invalid, or corrupt entries are rebuilt; development and compiler diagnostic
 modes bypass the cache. The cache has no user configuration and can be removed
 while no builds are running. See [build performance](build-performance.md) for
 its identity, portability, and verification contract.
+
+## Exact-thread native provider configuration
+
+Managed callers may reserve a thread with `dispatch:"deferred"` and bind
+`configurationGeneration` before using `threads.prepareConfiguration`. A future
+`dispatchReservation.expiresAt` acknowledges support; reservations last five
+minutes and preparation does not consume them. First work goes through ordinary
+`threads.send`. The CLI guide describes matching flags and release/prepare commands.
+
+Hermes supports an immutable `nativeContext.homePath`, with optional protected
+`mcpConfig` and `instructionsConfig` references `{path,sha256}`. The execution host
+requires existing canonical directories and owner-only regular mode0600 files
+inside that home, limited to64KiB MCP or1MiB native instructions. MCP JSON is
+`{servers:[{name,command,args,env:[{name,value}]}|{name,type:"http"|"sse",url,headers:[{name,value}]}]}`.
+Credentials remain in this protected local file. Remote transport support comes
+from actual ACP initialize capabilities. Unsupported providers/capabilities fail
+closed or return explicit unavailable readback; delivered is never applied.
+
+`threads.releaseConfiguration` releases an idle exact native session, retains its
+old delivery, and sets `configurationRelease`. That durable marker blocks direct
+and queued dispatch until an advanced generation is prepared by a distinct native
+provider instance. Home changes and hot active-provider updates are refused.

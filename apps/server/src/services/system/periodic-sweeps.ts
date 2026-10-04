@@ -47,6 +47,7 @@ import {
   hasLiveThreadStartInFlight,
 } from "../threads/thread-lifecycle.js";
 import { advanceThreadProvisioning } from "../threads/thread-provisioning.js";
+import { expireDeferredThreadReservations } from "../threads/thread-reservations.js";
 import {
   runQueuedMessageDispatch,
   type QueueWaitPluginDirectory,
@@ -490,6 +491,14 @@ async function runDestroyedEnvironmentPruneSweep(
 const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
   {
     cadenceMs: 0,
+    category: "orphan-cleanup",
+    name: "deferred-thread-reservation-expiry",
+    run: (deps, now) => {
+      expireDeferredThreadReservations(deps, now);
+    },
+  },
+  {
+    cadenceMs: 0,
     category: "durable-intent-retry",
     name: "environment-provider-lifecycle",
     run: sweepProviderLifecycles,
@@ -592,6 +601,7 @@ const PERIODIC_SWEEP_JOBS: PeriodicSweepJob[] = [
 export async function runStartupRecoverySweep(
   deps: LoggedPendingInteractionWorkSessionDeps,
 ): Promise<void> {
+  expireDeferredThreadReservations(deps, Date.now());
   await deliverLegacyDeferredThreadMessages(deps);
   await runEnvironmentProvisioningSweep(deps);
   await runThreadLifecycleSweep(deps);

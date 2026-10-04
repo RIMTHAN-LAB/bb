@@ -11,9 +11,21 @@ Every command supports --json for machine-readable output.
 
 Spawning:
 
+  A deferred thread remains pending and starts only after a separate ordinary send.
+  Its reservation expires after five minutes; the server archives it if it never
+  starts, including after restart. Do not combine --defer-dispatch with a prompt,
+  plan, attachment or --send-at. SDK: threads.spawn({ input: [], dispatch: "deferred", ... }).
+
   bb thread spawn --project <id> --prompt "..." [options]
 
-    --prompt <prompt>              Initial prompt (required)
+    --prompt <prompt>              Initial prompt (required unless --defer-dispatch)
+    --defer-dispatch               Reserve a thread without a provider turn
+    --configuration-generation <n> Bind an exact managed configuration generation
+    --native-home <path>           Immutable native profile home (Hermes)
+    --native-mcp-config <path>     Protected host-local MCP JSON (pair with --native-mcp-sha256)
+    --native-mcp-sha256 <sha256>    Exact MCP file bytes
+    --native-instructions-config <path> Protected native instructions (pair with --native-instructions-sha256)
+    --native-instructions-sha256 <sha256> Exact native instruction bytes
     --title <title>                Thread title
     --project <id>                 Project (required)
     --parent-thread <id>           Parent thread (may be in another project)
@@ -397,3 +409,23 @@ Lifecycle:
 
 Read-only commands require a thread ID or --self where supported.
 Mutating thread lifecycle and messaging commands require an explicit ID or --self.
+
+Managed provider preparation:
+
+  bb thread prepare <thread-id> --generation <n> [--timeout-ms <1..60000>] --json
+  bb thread release-configuration <thread-id> --generation <current-n> --json
+
+  Preparation creates or restores a provider session without a model prompt.
+  Check the future dispatchReservation returned by deferred create/GET before
+  installing a host binding. Preparation preserves that five-minute reservation
+  until the first nonempty ordinary send. Configuration readback says delivered;
+  each required native capability needs its own observed provider acknowledgement.
+  Unavailable evidence does not establish application.
+
+  Release requires an idle exact generation and a trusted host stop result.
+  GET returns configurationRelease and retains the old configurationDelivery.
+  The release blocks direct and queued dispatch, including same-generation
+  prepare, until a larger generation is installed and a distinct provider instance
+  acknowledges it. SDK: threads.releaseConfiguration / prepareConfiguration / update.
+  PATCH protected references with configurationGeneration and releaseProviderSession:true;
+  the existing native home cannot change. Active prompts are refused.

@@ -545,6 +545,28 @@ const commandHandlers: CommandHandlerMap = {
 };
 
 const onlineRpcHandlers: OnlineRpcHandlerMap = {
+  "thread.configuration.prepare": async (command, options) => {
+    const release =
+      await options.runtimeManager.retainEnvironmentForThreadCommand(
+        command.environmentId,
+        command.threadId,
+      );
+    try {
+      const entry = await ensureThreadRuntime(command, options);
+      const configurationDelivery = entry.configurationDeliveries?.get(
+        command.threadId,
+      );
+      return {
+        providerThreadId: command.resumeContext.providerThreadId,
+        ...(configurationDelivery === undefined
+          ? {}
+          : { configurationDelivery }),
+      };
+    } finally {
+      release();
+    }
+  },
+
   "environment.hook.run": runEnvironmentHook,
   "environment.hook.cancel": cancelEnvironmentHook,
   "desktop.browser.list_instances": async (command, options) => {

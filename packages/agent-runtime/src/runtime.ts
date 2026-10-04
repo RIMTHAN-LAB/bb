@@ -4,7 +4,12 @@ import {
   normalizeProviderThreadNameEvent,
   toProviderExternalThreadName,
 } from "@bb/domain";
-import type { DynamicTool, InstructionMode, ThreadEvent } from "@bb/domain";
+import type {
+  DynamicTool,
+  InstructionMode,
+  ThreadEvent,
+  ProviderConfigurationReadback,
+} from "@bb/domain";
 import type { AdapterCommand } from "./provider-adapter.js";
 import {
   BRIDGE_JSON_RPC_ERRORS,
@@ -1540,6 +1545,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
                 instructionMode,
               };
           let resolved: string;
+          let providerReadback: ProviderConfigurationReadback | undefined;
+          let providerInstanceId: string | undefined;
           try {
             const cmd = requireProviderRequestPlan({
               commandType: adapterCommand.type,
@@ -1568,6 +1575,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
               result.providerThreadId,
             );
             resolved = result.providerThreadId;
+            providerReadback = result.providerReadback;
+            providerInstanceId = result.providerInstanceId;
             emitResolvedProviderEnvironment({
               droppedContributions: resolvedEnvironment.droppedContributions,
               entries: resolvedEnvironment.entries,
@@ -1597,7 +1606,11 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
           }
 
           markHostedProviderSessionIdle(threadId);
-          return { providerThreadId: resolved };
+          return {
+            providerThreadId: resolved,
+            ...(providerReadback === undefined ? {} : { providerReadback }),
+            ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+          };
         },
       });
     },
@@ -1862,6 +1875,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
           }
 
           let resolved: string;
+          let providerReadback: ProviderConfigurationReadback | undefined;
+          let providerInstanceId: string | undefined;
           try {
             const result = await sendCommand({
               proc,
@@ -1880,6 +1895,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
             );
             updateSessionRestoreCapability(threadId, result.sessionRestorable);
             resolved = result.providerThreadId;
+            providerReadback = result.providerReadback;
+            providerInstanceId = result.providerInstanceId;
             emitResolvedProviderEnvironment({
               droppedContributions: resolvedEnvironment.droppedContributions,
               entries: resolvedEnvironment.entries,
@@ -1891,7 +1908,11 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
             throw resumeError;
           }
           markHostedProviderSessionIdle(threadId);
-          return { providerThreadId: resolved };
+          return {
+            providerThreadId: resolved,
+            ...(providerReadback === undefined ? {} : { providerReadback }),
+            ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+          };
         },
       });
     },

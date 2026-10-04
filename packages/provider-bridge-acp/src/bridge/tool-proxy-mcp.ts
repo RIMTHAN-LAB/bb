@@ -41,6 +41,7 @@ type BridgeRequest = BridgeRequestBase & BridgeRequestPayload;
 
 type BridgeRequestPayload =
   | { kind: "initialized"; toolCount: number }
+  | { kind: "toolsListed"; toolNames: string[] }
   | {
       kind: "toolCall";
       arguments: Record<string, unknown>;
@@ -162,6 +163,10 @@ function callBridge(
 ): Promise<BridgeToolCallResponse> {
   return new Promise((resolve, reject) => {
     const socket = createConnection({ host: env.host, port: env.port });
+    if (request.kind !== "toolCall")
+      socket.setTimeout(10_000, () =>
+        socket.destroy(new Error("ACP discovery acknowledgement timed out")),
+      );
     let buffer = "";
     socket.setEncoding("utf8");
     socket.on("connect", () => {
@@ -231,7 +236,12 @@ async function handleRequest(
   }
 
   switch (message.method) {
-    case "initialize":
+    case "initialize": {
+      const acknowledgement = await callBridge(env, {
+        kind: "initialized",
+        toolCount: env.tools.length,
+      });
+      if (!acknowledgement.ok) throw new Error(acknowledgement.error);
       writeResult(message.id, {
         protocolVersion:
           typeof objectParams(message.params).protocolVersion === "string"
@@ -240,19 +250,15 @@ async function handleRequest(
         capabilities: { tools: {} },
         serverInfo: { name: ACP_BRIDGE_MCP_SERVER_NAME, version: "1.0.0" },
       });
-      void callBridge(env, {
-        kind: "initialized",
-        toolCount: env.tools.length,
-      }).catch((error) => {
-        process.stderr.write(
-          `bb-bridge MCP: failed to report initialize: ${
-            error instanceof Error ? error.message : String(error)
-          }\n`,
-        );
-      });
       return;
+    }
 
-    case "tools/list":
+    case "tools/list": {
+      const acknowledgement = await callBridge(env, {
+        kind: "toolsListed",
+        toolNames: env.tools.map((tool) => tool.name),
+      });
+      if (!acknowledgement.ok) throw new Error(acknowledgement.error);
       writeResult(message.id, {
         tools: env.tools.map((tool) => ({
           name: tool.name,
@@ -261,6 +267,7 @@ async function handleRequest(
         })),
       });
       return;
+    }
 
     case "tools/call": {
       const params = objectParams(message.params);

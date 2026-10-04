@@ -150,6 +150,7 @@ describe("createThreadRecord", () => {
             },
             sectionId: sectionResult.section.id,
             input: [],
+            dispatch: "immediate",
             origin: "app",
             projectId: project.id,
             providerId: "codex",

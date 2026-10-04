@@ -21,7 +21,10 @@ export default experimental_defineHostEntry({
         agentId: input.providerId,
         cwd: input.cwd,
         homeDir: os.homedir(),
-        env: process.env,
+        env:
+          input.nativeContext === undefined
+            ? process.env
+            : { ...process.env, HERMES_HOME: input.nativeContext.homePath },
       }),
   },
 });

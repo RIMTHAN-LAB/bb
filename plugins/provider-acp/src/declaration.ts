@@ -4,6 +4,7 @@ import type {
   PluginProviderStrings,
 } from "@get-bb/plugin-sdk";
 import { ACP_FAMILY, type AcpAgentDefinition } from "./agents.js";
+import { z } from "zod";
 
 const ACP_BASE_CAPABILITIES: PluginProviderCapabilities = {
   supportsServiceTier: true,
@@ -44,6 +45,43 @@ export function acpProviderDeclaration(
 ): PluginProviderDeclaration {
   return {
     id: agent.id,
+    ...(agent.id === "acp-hermes"
+      ? {
+          experimental_supportsNativeContext: true,
+          deriveProviderOptions: (
+            context,
+          ): ReturnType<
+            NonNullable<PluginProviderDeclaration["deriveProviderOptions"]>
+          > => {
+            if (
+              context.nativeContext === undefined &&
+              context.configurationGeneration === undefined
+            )
+              return {};
+            return z
+              .record(z.string(), z.json())
+              .parse(
+                JSON.parse(
+                  JSON.stringify({
+                    ...(context.nativeContext === undefined
+                      ? {}
+                      : {
+                          acpLaunchSpec: {
+                            ...agent.launch,
+                            env: {
+                              ...agent.launch.env,
+                              HERMES_HOME: context.nativeContext.homePath,
+                            },
+                          },
+                          acpNativeContext: context.nativeContext,
+                        }),
+                    acpConfigurationGeneration: context.configurationGeneration,
+                  }),
+                ),
+              );
+          },
+        }
+      : {}),
     displayName: agent.displayName,
     family: ACP_FAMILY,
     ...(agent.icon === undefined ? {} : { icon: agent.icon }),

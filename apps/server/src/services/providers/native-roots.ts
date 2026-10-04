@@ -4,6 +4,7 @@ import {
   providerResolvedNativeRootsSchema,
   type ProviderNativeRootSet,
   type ProviderResolvedNativeRoots,
+  type NativeContext,
 } from "@bb/domain";
 import type {
   HostDaemonOnlineRpcResultForCommand,
@@ -125,12 +126,16 @@ function cacheKey(args: {
   providerId: string;
   hostId: string;
   cwd: string | null;
+  threadId?: string;
+  nativeContext?: NativeContext;
 }): string {
   return JSON.stringify([
     args.pluginId,
     args.providerId,
     args.hostId,
     args.cwd ?? "",
+    args.threadId ?? "",
+    args.nativeContext?.homePath ?? "",
   ]);
 }
 
@@ -139,6 +144,8 @@ interface ResolveNativeRootsArgs {
   hostId: string;
   cwd: string | null;
   timeoutMs: number;
+  threadId?: string;
+  nativeContext?: NativeContext;
 }
 
 async function callResolveNativeRoots(
@@ -163,7 +170,14 @@ async function callResolveNativeRoots(
         pluginId,
         contract: experimental_nativeRootsHostContract,
         method: "resolveNativeRoots",
-        input: { providerId, cwd: args.cwd },
+        input: {
+          providerId,
+          cwd: args.cwd,
+          ...(args.threadId === undefined ? {} : { threadId: args.threadId }),
+          ...(args.nativeContext === undefined
+            ? {}
+            : { nativeContext: args.nativeContext }),
+        },
         hostId: args.hostId,
         timeoutMs: args.timeoutMs,
         artifact,
@@ -192,6 +206,8 @@ export async function resolveProviderResolvedNativeRoots(
     providerId: registration.info.id,
     hostId: args.hostId,
     cwd: args.cwd,
+    threadId: args.threadId,
+    nativeContext: args.nativeContext,
   });
   const registrationRevision = deps.providerRegistry.getRegistrationRevision();
   const cached = deps.providerNativeRoots.lookup(key, registrationRevision);
@@ -239,6 +255,8 @@ interface ScanProviderNativeRootsArgs {
   registration: ProviderRegistration;
   hostId: string;
   cwd: string | null;
+  threadId?: string;
+  nativeContext?: NativeContext;
 }
 
 export function scanProviderNativeRoots(
@@ -259,6 +277,8 @@ export async function scanProviderNativeRoots(
     hostId: args.hostId,
     cwd: args.cwd,
     timeoutMs: budget.remainingMs(),
+    threadId: args.threadId,
+    nativeContext: args.nativeContext,
   });
   const scan = {
     providerId: args.registration.info.id,

@@ -2825,9 +2825,28 @@ describe("acp bridge", () => {
       providerThreadId: first.providerThreadId,
     });
     const response = await waitForResponse(resumeId);
-    expect(response.result).toEqual({
+    expect(response.result).toMatchObject({
       providerThreadId: first.providerThreadId,
       sessionRestorable: true,
+      providerInstanceId: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      providerReadback: {
+        instructions: {
+          status: "unavailable",
+          reason: "provider_instruction_readback_unavailable",
+        },
+        nativeInstructions: {
+          status: "unavailable",
+          reason: "provider_native_instruction_readback_unavailable",
+        },
+        skills: {
+          status: "unavailable",
+          reason: "provider_skill_readback_unavailable",
+        },
+        nativeMcp: {
+          status: "unavailable",
+          reason: "provider_native_mcp_readback_unavailable",
+        },
+      },
     });
     expect(threadEventsOfType("provider/warning")).toHaveLength(0);
     startedProviderThreadIds.push(first.providerThreadId);
@@ -3010,9 +3029,28 @@ describe("acp bridge", () => {
       providerThreadId: first.providerThreadId,
     });
     const response = await waitForResponse(resumeId);
-    expect(response.result).toEqual({
+    expect(response.result).toMatchObject({
       providerThreadId: first.providerThreadId,
       sessionRestorable: true,
+      providerInstanceId: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      providerReadback: {
+        instructions: {
+          status: "unavailable",
+          reason: "provider_instruction_readback_unavailable",
+        },
+        nativeInstructions: {
+          status: "unavailable",
+          reason: "provider_native_instruction_readback_unavailable",
+        },
+        skills: {
+          status: "unavailable",
+          reason: "provider_skill_readback_unavailable",
+        },
+        nativeMcp: {
+          status: "unavailable",
+          reason: "provider_native_mcp_readback_unavailable",
+        },
+      },
     });
     expect(
       threadEventsOfType("thread/contextWindowUsage/updated").at(-1),
@@ -3051,9 +3089,28 @@ describe("acp bridge", () => {
       providerThreadId: first.providerThreadId,
     });
     const response = await waitForResponse(resumeId);
-    expect(response.result).toEqual({
+    expect(response.result).toMatchObject({
       providerThreadId: first.providerThreadId,
       sessionRestorable: true,
+      providerInstanceId: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      providerReadback: {
+        instructions: {
+          status: "unavailable",
+          reason: "provider_instruction_readback_unavailable",
+        },
+        nativeInstructions: {
+          status: "unavailable",
+          reason: "provider_native_instruction_readback_unavailable",
+        },
+        skills: {
+          status: "unavailable",
+          reason: "provider_skill_readback_unavailable",
+        },
+        nativeMcp: {
+          status: "unavailable",
+          reason: "provider_native_mcp_readback_unavailable",
+        },
+      },
     });
     expect(threadEventsOfType("thread/contextWindowUsage/updated")).toEqual([]);
     startedProviderThreadIds.push(first.providerThreadId);
@@ -3129,9 +3186,28 @@ describe("acp bridge", () => {
       providerThreadId: first.providerThreadId,
     });
     const response = await waitForResponse(resumeId);
-    expect(response.result).toEqual({
+    expect(response.result).toMatchObject({
       providerThreadId: first.providerThreadId,
       sessionRestorable: true,
+      providerInstanceId: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      providerReadback: {
+        instructions: {
+          status: "unavailable",
+          reason: "provider_instruction_readback_unavailable",
+        },
+        nativeInstructions: {
+          status: "unavailable",
+          reason: "provider_native_instruction_readback_unavailable",
+        },
+        skills: {
+          status: "unavailable",
+          reason: "provider_skill_readback_unavailable",
+        },
+        nativeMcp: {
+          status: "unavailable",
+          reason: "provider_native_mcp_readback_unavailable",
+        },
+      },
     });
     startedProviderThreadIds.push(first.providerThreadId);
 

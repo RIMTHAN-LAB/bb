@@ -389,6 +389,8 @@ type ExpectedThreadsKey =
   | "paneAction"
   | "pin"
   | "promptHistory"
+  | "prepareConfiguration"
+  | "releaseConfiguration"
   | "queue"
   | "queuedMessages"
   | "reorderPinned"

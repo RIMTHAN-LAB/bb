@@ -40,6 +40,7 @@ import { clampPermissionModeToHost } from "../hosts/permission-ceiling.js";
 import type { ProviderRegistryService } from "../providers/provider-registry.js";
 import { resolveProviderPlanCommand } from "../providers/provider-plan-command.js";
 import { workspaceContextFromPath } from "../environments/workspace-command-target.js";
+import { readThreadProviderConfiguration } from "./thread-provider-configuration.js";
 import {
   requireBridgeLaunchForProviderId,
   resolveBridgeLaunchForProviderId,
@@ -199,10 +200,20 @@ function toRuntimeExecutionOptions(
     input: args.input,
     providerId: args.providerId,
   });
+  const providerConfiguration = readThreadProviderConfiguration(
+    args.deps.db,
+    args.threadId,
+  );
   const providerOptions =
     args.deps.providerRegistry.get(args.providerId)?.deriveProviderOptions({
       threadId: args.threadId,
       projectId: args.projectId,
+      ...(providerConfiguration === null
+        ? {}
+        : { configurationGeneration: providerConfiguration.generation }),
+      ...(providerConfiguration?.nativeContext === undefined
+        ? {}
+        : { nativeContext: providerConfiguration.nativeContext }),
       model: args.execution.model,
       permissionMode,
       ...(promptMode !== undefined ? { promptMode } : {}),
@@ -269,6 +280,10 @@ export async function buildThreadStartCommand(
     model: args.execution.model,
   });
   const bridgeLaunch = requireBridgeLaunchForProviderId(deps, args.providerId);
+  const providerConfiguration = readThreadProviderConfiguration(
+    deps.db,
+    args.thread.id,
+  );
   return {
     type: "thread.start",
     environmentId: args.environment.id,
@@ -295,6 +310,12 @@ export async function buildThreadStartCommand(
     dynamicTools: runtimeContext.dynamicTools,
     contributedEnv: runtimeContext.contributedEnv,
     injectedSkillSources: runtimeContext.injectedSkillSources,
+    ...(providerConfiguration === null
+      ? {}
+      : {
+          configurationGeneration: providerConfiguration.generation,
+          nativeContext: providerConfiguration.nativeContext,
+        }),
     instructionMode: runtimeContext.instructionMode,
     threadStoragePath: runtimeContext.threadStoragePath,
     ...(args.fork ? { fork: args.fork } : {}),
@@ -307,6 +328,10 @@ function buildPreparedTurnSubmitCommandPayload(
   const bridgeLaunch = requireBridgeLaunchForProviderId(
     args.deps,
     args.runtimeContext.providerId,
+  );
+  const providerConfiguration = readThreadProviderConfiguration(
+    args.deps.db,
+    args.threadId,
   );
   return {
     type: "turn.submit",
@@ -336,6 +361,12 @@ function buildPreparedTurnSubmitCommandPayload(
       dynamicTools: args.runtimeContext.dynamicTools,
       contributedEnv: args.runtimeContext.contributedEnv,
       injectedSkillSources: args.runtimeContext.injectedSkillSources,
+      ...(providerConfiguration === null
+        ? {}
+        : {
+            configurationGeneration: providerConfiguration.generation,
+            nativeContext: providerConfiguration.nativeContext,
+          }),
       instructionMode: args.runtimeContext.instructionMode,
     },
   };

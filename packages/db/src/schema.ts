@@ -631,6 +631,30 @@ export const threads = sqliteTable(
   ],
 );
 
+export const threadProviderConfigurations = sqliteTable(
+  "thread_provider_configurations",
+  {
+    threadId: text("thread_id")
+      .primaryKey()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    desired: text("desired").notNull(),
+    delivered: text("delivered"),
+  },
+);
+
+export const threadDispatchReservations = sqliteTable(
+  "thread_dispatch_reservations",
+  {
+    threadId: text("thread_id")
+      .primaryKey()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => [
+    index("thread_dispatch_reservations_expiry_idx").on(table.expiresAt),
+  ],
+);
+
 export const threadTabs = sqliteTable("thread_tabs", {
   threadId: text("thread_id")
     .primaryKey()

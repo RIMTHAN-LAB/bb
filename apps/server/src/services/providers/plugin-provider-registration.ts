@@ -217,6 +217,11 @@ export function buildPluginProviderRegistration(args: {
     info,
     serverCapabilities,
     bridgeOptions: declaration.experimental_bridgeOptions ?? {},
+    ...(declaration.experimental_supportsNativeContext === undefined
+      ? {}
+      : {
+          supportsNativeContext: declaration.experimental_supportsNativeContext,
+        }),
     extensionKinds: declaration.extensionKinds ?? {},
     visibility: declaration.experimental_visibility ?? "always",
     fallbackModels: projectFallbackModels(declaration),

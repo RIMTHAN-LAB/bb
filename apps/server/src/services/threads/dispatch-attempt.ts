@@ -1,3 +1,10 @@
+import { requirePreparedThreadConfiguration } from "./thread-provider-configuration.js";
+import { consumeThreadConfigurationRelease } from "./thread-provider-configuration.js";
+import { requireNoThreadConfigurationTransition } from "./thread-lifecycle.js";
+import {
+  consumeDispatchReservation,
+  requireUnexpiredDispatchReservation,
+} from "./thread-reservations.js";
 import { requestQueuedMachineReadiness } from "./queued-message-dispatch.js";
 import {
   cancelPreparingMachinePause,
@@ -15,6 +22,7 @@ import {
 } from "@bb/db";
 import {
   promptInputSchema,
+  resolvedThreadExecutionOptionsSchema,
   type PromptInput,
   type QueuedMessagePayload,
   type QueuedMessageWaitingOn,
@@ -88,10 +96,27 @@ export const pendingThreadStartContextSchema = z.object({
   providerInput: z.array(promptInputSchema).optional(),
   startedOnBehalfOf: startedOnBehalfOfSchema.nullable(),
   titleProvided: z.boolean(),
+  reservationExpiresAt: z.number().int().nonnegative().optional(),
+  reservationExecution: resolvedThreadExecutionOptionsSchema.optional(),
 });
 export type PendingThreadStartContext = z.infer<
   typeof pendingThreadStartContextSchema
 >;
+
+function requireUnexpiredThreadReservation(
+  context: PendingThreadStartContext | null,
+): void {
+  if (
+    context?.reservationExpiresAt !== undefined &&
+    context.reservationExpiresAt <= Date.now()
+  ) {
+    throw new ApiError(
+      410,
+      "thread_reservation_expired",
+      "The deferred thread reservation expired; create a new thread.",
+    );
+  }
+}
 
 export function readPendingThreadStartContext(
   deps: Pick<LoggedPendingInteractionWorkSessionDeps, "db">,
@@ -291,6 +316,13 @@ async function runDispatchAttempt(
   reattempted: boolean,
 ): Promise<DispatchAttemptOutcome> {
   const { payload, thread } = args;
+  requireNoThreadConfigurationTransition(thread.id);
+  requirePreparedThreadConfiguration(deps.db, thread.id);
+  requireUnexpiredDispatchReservation(deps.db, thread.id);
+  if (thread.status === "pending")
+    requireUnexpiredThreadReservation(
+      readPendingThreadStartContext(deps, thread.id),
+    );
   const initialHost = dispatchEnvironmentAndHost(
     deps,
     thread.environmentId,
@@ -339,7 +371,12 @@ async function runDispatchAttempt(
 
   const execution = await buildExecutionOptions(
     deps,
-    payload,
+    {
+      ...(thread.status === "pending"
+        ? readPendingThreadStartContext(deps, thread.id)?.reservationExecution
+        : undefined),
+      ...payload,
+    },
     args.executionDefaults ?? { threadId: thread.id },
   );
   const resolvedPayload = resolveExecutionIntoPayload(payload, execution);
@@ -578,15 +615,16 @@ async function runDispatchAttempt(
     thread,
     trigger: args.trigger,
     ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
-    ...(claimed === null
-      ? {}
-      : {
-          beforeAppendInTransaction: consumeClaimedRows(
-            claimed,
-            thread.id,
-            respectManualStopPause,
-          ),
-        }),
+    beforeAppendInTransaction: ({ tx }) => {
+      requireNoThreadConfigurationTransition(thread.id);
+      requirePreparedThreadConfiguration(deps.db, thread.id);
+      if (resolvedPayload.input.length > 0) {
+        consumeDispatchReservation(tx, thread.id);
+        consumeThreadConfigurationRelease(tx, thread.id);
+      }
+      if (claimed !== null)
+        consumeClaimedRows(claimed, thread.id, respectManualStopPause)({ tx });
+    },
   });
   if (claimed !== null) {
     settleQueueRowDispatched({ row: claimed[0]! });
@@ -711,6 +749,16 @@ async function admitPendingThread(
   try {
     startingThread = deps.db.transaction(
       (tx) => {
+        requireNoThreadConfigurationTransition(args.thread.id);
+        requirePreparedThreadConfiguration(deps.db, args.thread.id);
+        if (getThread(tx, args.thread.id)?.status !== "pending") {
+          throw new PendingThreadAdmissionLost();
+        }
+        requireUnexpiredThreadReservation(startContext);
+        if (args.payload.input.length > 0) {
+          consumeDispatchReservation(tx, args.thread.id);
+          consumeThreadConfigurationRelease(tx, args.thread.id);
+        }
         // The row is consumed and the thread flipped in ONE transaction: a
         // flip that loses to a concurrent attempt rolls the consumption back,
         // so the row stays claimed for the caller to hand back rather than

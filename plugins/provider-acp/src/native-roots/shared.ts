@@ -137,7 +137,7 @@ export async function childDirectoryPaths(
 
 export function skillsRoot(args: {
   ancestors?: boolean;
-  origin: ResolvedRootOrigin;
+  origin: ResolvedRootOrigin | "plugin";
   path: string;
   recursive: boolean;
   skipIfManifest?: string;
@@ -155,7 +155,7 @@ export function skillsRoot(args: {
 }
 
 export function configuredSkillRoot(args: {
-  origin: ResolvedRootOrigin;
+  origin: ResolvedRootOrigin | "plugin";
   recursive: boolean;
   skillPath: string;
 }): AcpResolvedSkillRoot {

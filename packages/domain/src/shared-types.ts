@@ -101,6 +101,7 @@ const promptMentionCommandOriginValues = [
   "builtin",
   "project",
   "user",
+  "plugin",
 ] as const;
 const promptMentionCommandOriginSchema = z.enum(
   promptMentionCommandOriginValues,

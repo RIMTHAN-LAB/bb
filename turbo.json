@@ -612,6 +612,7 @@
       "dependsOn": [
         "//#ensure-native-modules",
         "@get-bb/plugin-sdk#build",
+        "@bb/agent-runtime#generate:test-bridges",
         "topo"
       ],
       "inputs": [

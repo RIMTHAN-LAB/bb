@@ -38,6 +38,11 @@ import { listQueuedThreadMessageCountsByThreadIds } from "@bb/db";
 import { resolveEnvironmentWorkspaceDisplayKind } from "../environments/environment-response.js";
 import { canThreadSpawnChild } from "./thread-parent.js";
 import { toThreadEventWithMeta } from "./timeline.js";
+import { readDispatchReservation } from "./thread-reservations.js";
+import {
+  readThreadConfigurationDelivery,
+  readThreadProviderConfiguration,
+} from "./thread-provider-configuration.js";
 
 type ThreadRuntimeDisplayHub = Pick<
   NotificationHub,
@@ -348,8 +353,27 @@ export function toThreadResponseFromThread(
     ...args,
     environmentHostId: resolveThreadEnvironmentHostId(deps, args.thread),
   });
+  const providerConfiguration = readThreadProviderConfiguration(
+    deps.db,
+    args.thread.id,
+  );
+  const delivery = readThreadConfigurationDelivery(deps.db, args.thread.id);
   return {
     ...threadWithRuntime,
+    dispatchReservation:
+      args.thread.archivedAt === null && args.thread.deletedAt === null
+        ? readDispatchReservation(deps.db, args.thread.id)
+        : null,
+    ...(providerConfiguration === null
+      ? {}
+      : {
+          configurationGeneration: providerConfiguration.generation,
+          ...(providerConfiguration.nativeContext === undefined
+            ? {}
+            : { nativeContext: providerConfiguration.nativeContext }),
+        }),
+    ...(delivery === null ? {} : { configurationDelivery: delivery }),
+    configurationRelease: providerConfiguration?.release ?? null,
     activeBackgroundAgentCount:
       listActiveBackgroundTaskCountsByThreadIds(deps.db, {
         threadIds: [args.thread.id],

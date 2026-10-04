@@ -23,6 +23,7 @@ import { signalRequestArgs, type CreateSdkAreaArgs } from "./common.js";
 export interface SkillWorkspaceArgs {
   projectId: string;
   environmentId: string | null;
+  threadId?: string;
 }
 
 export interface SkillListArgs extends SkillWorkspaceArgs {
@@ -198,6 +199,9 @@ export function createSkillsArea(args: CreateSdkAreaArgs): SkillsArea {
               skillId: input.skillId,
               path: input.path,
               environmentId: input.environmentId ?? "",
+              ...(input.threadId === undefined
+                ? {}
+                : { threadId: input.threadId }),
             },
           },
           ...signalRequestArgs(input.signal),
@@ -209,7 +213,12 @@ export function createSkillsArea(args: CreateSdkAreaArgs): SkillsArea {
         transport.api.v1.projects[":id"].skills.$get(
           {
             param: { id: input.projectId },
-            query: { environmentId: input.environmentId ?? "" },
+            query: {
+              environmentId: input.environmentId ?? "",
+              ...(input.threadId === undefined
+                ? {}
+                : { threadId: input.threadId }),
+            },
           },
           ...signalRequestArgs(input.signal),
         ),
@@ -223,6 +232,9 @@ export function createSkillsArea(args: CreateSdkAreaArgs): SkillsArea {
             query: {
               skillId: input.skillId,
               environmentId: input.environmentId ?? "",
+              ...(input.threadId === undefined
+                ? {}
+                : { threadId: input.threadId }),
             },
           },
           ...signalRequestArgs(input.signal),

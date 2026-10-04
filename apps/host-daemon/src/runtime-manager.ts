@@ -58,11 +58,12 @@ const PROVIDER_PROCESS_EXIT_DETAIL_MAX_LENGTH = 4000;
 interface RuntimeSkillConfig {
   catalogHash: string;
   skillRoots: readonly AgentRuntimeSkillRoot[];
+  sourceTreeHashes: readonly string[];
 }
 
 interface CreateEntryArgs extends Omit<
   EnsureEnvironmentArgs,
-  "injectedSkillSources" | "targetThreadId"
+  "injectedSkillSources"
 > {
   provisionSignal: AbortSignal;
   skillConfig: RuntimeSkillConfig | null;
@@ -72,6 +73,7 @@ interface EnsureCompatibleEntryArgs {
   entry: RuntimeEntry;
   skillConfig: RuntimeSkillConfig | null;
   targetThreadId?: string;
+  configurationGeneration?: number;
 }
 
 interface ReplaceEntryForSkillCatalogArgs {
@@ -124,6 +126,14 @@ function buildProviderProcessExitDetail(
 
 export interface RuntimeEntry {
   environmentId: string;
+  runtimeKey?: string;
+  runtimeThreadId?: string;
+  configurationGeneration?: number;
+  sourceTreeHashes?: readonly string[];
+  configurationDeliveries?: Map<
+    string,
+    import("@bb/domain").ThreadConfigurationDelivery
+  >;
   runtime: AgentRuntime;
   skillCatalogHash: string | null;
   lastWarnedStaleSkillCatalogHash: string | null;
@@ -143,6 +153,8 @@ export interface EnsureEnvironmentArgs {
   injectedSkillSources?: readonly HostDaemonInjectedSkillSource[];
   setupScriptTimeoutMs?: number | null;
   targetThreadId?: string;
+  configurationGeneration?: number;
+  nativeContext?: { homePath: string };
   workspacePath?: string;
   provision?: ProvisionWorkspaceArgs;
 }
@@ -314,11 +326,28 @@ export class RuntimeManager {
   }
 
   get(environmentId: string): RuntimeEntry | undefined {
-    return this.entries.get(environmentId);
+    return (
+      this.entries.get(environmentId) ??
+      [...this.entries.values()].find(
+        (entry) => entry.environmentId === environmentId,
+      )
+    );
+  }
+
+  getForThread(
+    environmentId: string,
+    threadId: string,
+  ): RuntimeEntry | undefined {
+    return [...this.entries.values()].find(
+      (entry) =>
+        entry.environmentId === environmentId &&
+        (entry.runtimeThreadId === threadId ||
+          entry.runtime.hasThread(threadId)),
+    );
   }
 
   async getOrAwait(environmentId: string): Promise<RuntimeEntry | undefined> {
-    const existing = this.entries.get(environmentId);
+    const existing = this.get(environmentId);
     if (existing) {
       return existing;
     }
@@ -431,11 +460,15 @@ export class RuntimeManager {
   }
 
   markTerminalActive(environmentId: string, terminalId: string): void {
-    this.entries.get(environmentId)?.terminals.add(terminalId);
+    for (const entry of this.entries.values())
+      if (entry.environmentId === environmentId)
+        entry.terminals.add(terminalId);
   }
 
   markTerminalInactive(environmentId: string, terminalId: string): void {
-    this.entries.get(environmentId)?.terminals.delete(terminalId);
+    for (const entry of this.entries.values())
+      if (entry.environmentId === environmentId)
+        entry.terminals.delete(terminalId);
   }
 
   async retainEnvironmentForThreadCommand(
@@ -525,7 +558,11 @@ export class RuntimeManager {
   }
 
   listLoadedEnvironments(): HostDaemonLoadedEnvironment[] {
-    return [...this.entries.keys()].map((environmentId) => ({
+    return [
+      ...new Set(
+        [...this.entries.values()].map((entry) => entry.environmentId),
+      ),
+    ].map((environmentId) => ({
       environmentId,
     }));
   }
@@ -586,6 +623,7 @@ export class RuntimeManager {
       return {
         catalogHash: EMPTY_SKILL_CATALOG_HASH,
         skillRoots: [],
+        sourceTreeHashes: [],
       };
     }
     if (!this.options.dataDir) {
@@ -620,7 +658,10 @@ export class RuntimeManager {
       return false;
     }
     return [...commandsByThreadId.keys()].some(
-      (threadId) => threadId !== excludingThreadId,
+      (threadId) =>
+        threadId !== excludingThreadId &&
+        (entry.runtimeThreadId === undefined ||
+          threadId === entry.runtimeThreadId),
     );
   }
 
@@ -687,7 +728,7 @@ export class RuntimeManager {
       });
     }
 
-    this.entries.delete(args.entry.environmentId);
+    this.entries.delete(args.entry.runtimeKey ?? args.entry.environmentId);
     await this.stopWatchingStatus(args.entry);
     await args.entry.runtime.shutdown();
     await this.cleanupUnusedInjectedSkillStagingDirs([
@@ -700,9 +741,11 @@ export class RuntimeManager {
   ): Promise<RuntimeEntry | null> {
     if (
       args.skillConfig === null ||
-      args.entry.skillCatalogHash === args.skillConfig.catalogHash ||
+      (args.entry.skillCatalogHash === args.skillConfig.catalogHash &&
+        args.entry.configurationGeneration === args.configurationGeneration) ||
       (args.entry.skillCatalogHash === null &&
-        args.skillConfig.skillRoots.length === 0)
+        args.skillConfig.skillRoots.length === 0 &&
+        args.entry.configurationGeneration === args.configurationGeneration)
     ) {
       return args.entry;
     }
@@ -818,7 +861,7 @@ export class RuntimeManager {
 
     for (const entry of idleEntries) {
       await this.stopWatchingStatus(entry);
-      this.entries.delete(entry.environmentId);
+      this.entries.delete(entry.runtimeKey ?? entry.environmentId);
     }
 
     await Promise.all(idleEntries.map((entry) => entry.runtime.shutdown()));
@@ -879,12 +922,28 @@ export class RuntimeManager {
   }
 
   async ensureEnvironment(args: EnsureEnvironmentArgs): Promise<RuntimeEntry> {
+    const runtimeKey =
+      args.configurationGeneration === undefined
+        ? args.environmentId
+        : JSON.stringify([
+            args.environmentId,
+            args.targetThreadId,
+            args.nativeContext?.homePath ?? "",
+          ]);
+    if (
+      args.configurationGeneration !== undefined &&
+      args.targetThreadId === undefined
+    )
+      throw new Error(
+        "Managed runtime configuration requires an exact target thread",
+      );
     const skillConfig = await this.resolveRuntimeSkillConfig(args);
-    const existing = this.entries.get(args.environmentId);
+    const existing = this.entries.get(runtimeKey);
     if (existing) {
       const compatible = await this.ensureCompatibleEntry({
         entry: existing,
         skillConfig,
+        configurationGeneration: args.configurationGeneration,
         ...(args.targetThreadId !== undefined
           ? { targetThreadId: args.targetThreadId }
           : {}),
@@ -894,12 +953,13 @@ export class RuntimeManager {
       }
     }
 
-    const pending = this.pendingEntries.get(args.environmentId);
+    const pending = this.pendingEntries.get(runtimeKey);
     if (pending) {
       const entry = await pending;
       const compatible = await this.ensureCompatibleEntry({
         entry,
         skillConfig,
+        configurationGeneration: args.configurationGeneration,
         ...(args.targetThreadId !== undefined
           ? { targetThreadId: args.targetThreadId }
           : {}),
@@ -909,9 +969,7 @@ export class RuntimeManager {
       }
     }
 
-    const pendingProvision = this.createPendingEnvironmentProvision(
-      args.environmentId,
-    );
+    const pendingProvision = this.createPendingEnvironmentProvision(runtimeKey);
     const creation = Promise.resolve()
       .then(() =>
         this.createEntry({
@@ -921,24 +979,19 @@ export class RuntimeManager {
         }),
       )
       .then((entry) => {
-        this.entries.set(args.environmentId, entry);
+        entry.runtimeKey = runtimeKey;
+        this.entries.set(runtimeKey, entry);
         return entry;
       })
       .finally(() => {
-        this.pendingEntries.delete(args.environmentId);
-        this.pendingCatalogHashes.delete(args.environmentId);
-        this.clearPendingEnvironmentProvision(
-          args.environmentId,
-          pendingProvision,
-        );
+        this.pendingEntries.delete(runtimeKey);
+        this.pendingCatalogHashes.delete(runtimeKey);
+        this.clearPendingEnvironmentProvision(runtimeKey, pendingProvision);
       });
     pendingProvision.done = creation;
-    this.pendingEntries.set(args.environmentId, creation);
+    this.pendingEntries.set(runtimeKey, creation);
     if (skillConfig !== null) {
-      this.pendingCatalogHashes.set(
-        args.environmentId,
-        skillConfig.catalogHash,
-      );
+      this.pendingCatalogHashes.set(runtimeKey, skillConfig.catalogHash);
     }
 
     return creation;
@@ -977,27 +1030,28 @@ export class RuntimeManager {
         `Workspace refresh for ${args.environmentId} returned ${workspace.path}, not ${args.workspacePath}`,
       );
     }
-    if (entry) {
-      entry.workspace = workspace;
-    }
+    for (const current of this.entries.values())
+      if (current.environmentId === args.environmentId)
+        current.workspace = workspace;
     return workspace;
   }
 
   async cancelEnvironmentProvision(
     args: CancelEnvironmentProvisionArgs,
   ): Promise<CancelEnvironmentProvisionResult> {
-    const pending = this.pendingEnvironmentProvisions.get(args.environmentId);
-    if (!pending) {
-      return { aborted: false };
-    }
-
-    pending.abortController.abort(
-      new WorkspaceError(
-        "provision_cancelled",
-        "Environment provisioning was cancelled",
-      ),
+    const pending = [...this.pendingEnvironmentProvisions.entries()].filter(
+      ([key]) =>
+        key === args.environmentId ||
+        key.startsWith(JSON.stringify([args.environmentId]).slice(0, -1) + ","),
     );
-    return { aborted: true };
+    for (const [, item] of pending)
+      item.abortController.abort(
+        new WorkspaceError(
+          "provision_cancelled",
+          "Environment provisioning was cancelled",
+        ),
+      );
+    return { aborted: pending.length > 0 };
   }
 
   private createPendingEnvironmentProvision(
@@ -1045,10 +1099,18 @@ export class RuntimeManager {
   }
 
   async forgetEnvironment(environmentId: string): Promise<void> {
-    const entry = await this.shutDownEntry(environmentId);
-    if (!entry) {
-      return;
-    }
+    const keys = new Set(
+      [...this.entries.entries()]
+        .filter(([, entry]) => entry.environmentId === environmentId)
+        .map(([key]) => key),
+    );
+    for (const key of this.pendingEntries.keys())
+      if (
+        key === environmentId ||
+        key.startsWith(JSON.stringify([environmentId]).slice(0, -1) + ",")
+      )
+        keys.add(key);
+    for (const key of keys) await this.shutDownEntry(key);
     await this.cleanupUnusedInjectedSkillStagingDirs([]);
   }
 
@@ -1063,7 +1125,7 @@ export class RuntimeManager {
 
     for (const entry of idleEntries) {
       await this.stopWatchingStatus(entry);
-      this.entries.delete(entry.environmentId);
+      this.entries.delete(entry.runtimeKey ?? entry.environmentId);
     }
 
     const shutdownResults = await Promise.allSettled(
@@ -1279,13 +1341,21 @@ export class RuntimeManager {
             });
           }
         }
-        const current = this.entries.get(args.environmentId);
+        const key =
+          args.configurationGeneration === undefined
+            ? args.environmentId
+            : JSON.stringify([
+                args.environmentId,
+                args.targetThreadId,
+                args.nativeContext?.homePath ?? "",
+              ]);
+        const current = this.entries.get(key);
         if (
           !info.expected &&
           current?.runtime === runtime &&
           runtime.listRunningProviders().length === 0
         ) {
-          this.entries.delete(args.environmentId);
+          this.entries.delete(key);
         }
         this.options.onProcessExit?.(info);
       },
@@ -1293,6 +1363,14 @@ export class RuntimeManager {
 
     return {
       environmentId: args.environmentId,
+      ...(args.configurationGeneration === undefined
+        ? {}
+        : {
+            configurationGeneration: args.configurationGeneration,
+            runtimeThreadId: args.targetThreadId,
+          }),
+      sourceTreeHashes: args.skillConfig?.sourceTreeHashes ?? [],
+      configurationDeliveries: new Map(),
       runtime,
       skillCatalogHash: args.skillConfig?.catalogHash ?? null,
       lastWarnedStaleSkillCatalogHash: null,

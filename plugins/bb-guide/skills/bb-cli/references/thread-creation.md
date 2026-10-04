@@ -221,3 +221,23 @@ Resuming a machine restores its provider state without rerunning environment set
 Personal file access: `bb project paths|files|content proj_personal` requires
 an explicit `--environment <id>` belonging to Personal. Personal has no default
 project source; the selected environment must be ready.
+
+## Reserve before the first turn
+
+Use `bb thread spawn --project <id> --provider <id> --defer-dispatch --json` to obtain the exact thread ID without a provider turn. SDK callers use `threads.spawn({ ..., input: [], dispatch: "deferred" })`. Install any host-owned binding before sending the first prompt through the ordinary `bb thread send` or SDK send API. Deferred creation forbids initial input and `sendAt`. The reservation expires after five minutes; an expired first send is refused and the server archives still-pending reservations, including after restart. The default immediate creation behavior is unchanged.
+
+Use `bb thread prepare ID --generation N --timeout-ms 30000 --json` after
+installing the exact host binding. It prepares the native session without a model
+turn. Inspect `configurationDelivery.providerReadback`; delivered status alone
+does not prove required capabilities were acknowledged. For an existing idle
+conversation, `bb thread release-configuration ID --generation OLD --json` obtains
+a trusted release marker. Release blocks dispatch until an advanced generation is
+installed and prepared; managed restore refuses silently replacing lost history.
+
+Hermes native profiles use `--native-home` plus optional protected-file pairs
+`--native-mcp-config`/`--native-mcp-sha256` and
+`--native-instructions-config`/`--native-instructions-sha256`, together with
+`--configuration-generation`. Paths refer to canonical owner-only regular files
+inside the immutable home on the execution host. MCP is limited to64KiB and
+native instructions to1MiB. The API exposes only paths/hashes. HTTP/SSE require
+actual ACP negotiation. SDK callers use the same `nativeContext` object.

@@ -1185,6 +1185,75 @@ describe("@bb/sdk", () => {
     expect(queue.requests).toEqual([]);
   });
 
+  it("passes an explicit deferred dispatch through the public thread SDK", async () => {
+    const queue = createFetchQueue([
+      { body: { id: "thr_reserved" }, status: 201 },
+    ]);
+    const sdk = createBbSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://bb.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+    await sdk.threads.spawn({
+      projectId: "proj_123",
+      environment: { type: "reuse", environmentId: "env_123" },
+      input: [],
+      dispatch: "deferred",
+    });
+    expect(JSON.parse(queue.requests[0]!.bodyText!)).toEqual({
+      projectId: "proj_123",
+      environment: { type: "reuse", environmentId: "env_123" },
+      input: [],
+      dispatch: "deferred",
+      origin: "sdk",
+      startedOnBehalfOf: null,
+      originKind: null,
+    });
+  });
+
+  it("uses exact generation-fenced configuration release and preparation routes", async () => {
+    const queue = createFetchQueue([
+      { body: { id: "thr_bound" } },
+      { body: { id: "thr_bound" } },
+    ]);
+    const sdk = createBbSdk({
+      transport: createHttpTransport({
+        baseUrl: "http://bb.test",
+        fetch: queue.fetch,
+        runtime: "node",
+      }),
+    });
+    await sdk.threads.releaseConfiguration({
+      threadId: "thr_bound",
+      configurationGeneration: 3,
+    });
+    await sdk.threads.prepareConfiguration({
+      threadId: "thr_bound",
+      configurationGeneration: 4,
+      timeoutMs: 2000,
+    });
+    expect(
+      queue.requests.map((request) => [
+        request.method,
+        request.url,
+        JSON.parse(request.bodyText!),
+      ]),
+    ).toEqual([
+      [
+        "POST",
+        "http://bb.test/api/v1/threads/thr_bound/configuration/release",
+        { configurationGeneration: 3 },
+      ],
+      [
+        "POST",
+        "http://bb.test/api/v1/threads/thr_bound/configuration/prepare",
+        { configurationGeneration: 4, timeoutMs: 2000 },
+      ],
+    ]);
+  });
+
   it("fills thread spawn defaults before sending a request", async () => {
     const queue = createFetchQueue([{ body: { id: "thr_1" }, status: 201 }]);
     const sdk = createBbSdk({

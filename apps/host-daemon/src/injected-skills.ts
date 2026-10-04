@@ -46,6 +46,7 @@ interface CleanupInjectedSkillStagingDirsArgs {
 interface StagedInjectedSkills {
   catalogHash: string;
   skillRoots: readonly AgentRuntimeSkillRoot[];
+  sourceTreeHashes: readonly string[];
 }
 
 interface CopyInjectedSkillSourceArgs {
@@ -787,6 +788,7 @@ export async function stageInjectedSkillSources(
     return {
       catalogHash: EMPTY_SKILL_CATALOG_HASH,
       skillRoots: [],
+      sourceTreeHashes: [],
     };
   }
 
@@ -870,6 +872,7 @@ export async function stageInjectedSkillSources(
     return {
       catalogHash: EMPTY_SKILL_CATALOG_HASH,
       skillRoots: [],
+      sourceTreeHashes: [],
     };
   }
 
@@ -881,6 +884,9 @@ export async function stageInjectedSkillSources(
   });
   return {
     catalogHash,
+    sourceTreeHashes: sortedTrees.flatMap((tree) =>
+      tree.source.kind === "tree" ? [tree.source.treeHash] : [],
+    ),
     skillRoots: buildSkillRoots({
       catalogHash,
       stageRootPath,

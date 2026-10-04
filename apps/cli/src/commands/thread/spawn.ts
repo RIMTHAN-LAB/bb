@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import {
   jsonValueSchema,
+  nativeContextSchema,
   PERSONAL_PROJECT_ID,
   threadVisibilitySchema,
   type GitBranchSelection,
@@ -39,7 +40,14 @@ const PROVIDER_HELP =
   "Provider ID for the thread. Omit to use the project's remembered provider choice";
 
 interface ThreadSpawnCommandOptions {
-  prompt: string;
+  prompt?: string;
+  deferDispatch?: boolean;
+  nativeHome?: string;
+  nativeMcpConfig?: string;
+  nativeMcpSha256?: string;
+  nativeInstructionsConfig?: string;
+  nativeInstructionsSha256?: string;
+  configurationGeneration?: string;
   json?: boolean;
   project?: string;
   environment?: string;
@@ -316,7 +324,35 @@ export function registerSpawnCommand(
     .description(
       "Spawn a new thread; omitted execution flags use remembered project defaults, then the target provider catalog default",
     )
-    .requiredOption("--prompt <prompt>", "Initial prompt for the thread")
+    .option("--prompt <prompt>", "Initial prompt for the thread")
+    .option(
+      "--defer-dispatch",
+      "Reserve a thread for five minutes without a provider turn; send its first prompt separately",
+    )
+    .option(
+      "--native-home <path>",
+      "Immutable provider-native profile home (supported providers only)",
+    )
+    .option(
+      "--native-mcp-config <path>",
+      "Protected local MCP config inside the native home",
+    )
+    .option(
+      "--native-mcp-sha256 <digest>",
+      "Exact protected local MCP config digest",
+    )
+    .option(
+      "--native-instructions-config <path>",
+      "Protected local instruction file inside the native home",
+    )
+    .option(
+      "--native-instructions-sha256 <digest>",
+      "Exact protected local instruction file digest",
+    )
+    .option(
+      "--configuration-generation <number>",
+      "Exact managed configuration generation",
+    )
     .option("--json", "Print machine-readable JSON output")
     .requiredOption("--project <id>", "Project ID")
     .option(
@@ -399,6 +435,71 @@ export function registerSpawnCommand(
         });
         if (!projectId) {
           throw new Error("Missing required option --project <id>.");
+        }
+        if (
+          opts.deferDispatch &&
+          (opts.prompt !== undefined ||
+            opts.plan ||
+            opts.file?.length ||
+            opts.image?.length ||
+            opts.sendAt !== undefined)
+        ) {
+          throw new Error(
+            "--defer-dispatch requires no --prompt, --plan, --file, --image or --send-at.",
+          );
+        }
+        if (!opts.deferDispatch && opts.prompt === undefined) {
+          throw new Error(
+            "--prompt is required unless --defer-dispatch is selected.",
+          );
+        }
+        if (
+          (opts.nativeMcpConfig !== undefined ||
+            opts.nativeMcpSha256 !== undefined ||
+            opts.nativeInstructionsConfig !== undefined ||
+            opts.nativeInstructionsSha256 !== undefined) &&
+          opts.nativeHome === undefined
+        ) {
+          throw new Error(
+            "Native configuration references require --native-home.",
+          );
+        }
+        const nativeContext =
+          opts.nativeHome === undefined
+            ? undefined
+            : nativeContextSchema.parse({
+                homePath: opts.nativeHome,
+                ...(opts.nativeMcpConfig === undefined &&
+                opts.nativeMcpSha256 === undefined
+                  ? {}
+                  : {
+                      mcpConfig: {
+                        path: opts.nativeMcpConfig,
+                        sha256: opts.nativeMcpSha256,
+                      },
+                    }),
+                ...(opts.nativeInstructionsConfig === undefined &&
+                opts.nativeInstructionsSha256 === undefined
+                  ? {}
+                  : {
+                      instructionsConfig: {
+                        path: opts.nativeInstructionsConfig,
+                        sha256: opts.nativeInstructionsSha256,
+                      },
+                    }),
+              });
+        const configurationGeneration =
+          opts.configurationGeneration === undefined
+            ? undefined
+            : Number(opts.configurationGeneration);
+        if (
+          configurationGeneration !== undefined &&
+          (!Number.isSafeInteger(configurationGeneration) ||
+            configurationGeneration < 0)
+        ) {
+          throw new Error(
+            "--configuration-generation must be a nonnegative integer.",
+          );
         }
         const environmentValue = resolveSpawnEnvironmentValue(opts.environment);
         if (
@@ -549,12 +650,19 @@ export function registerSpawnCommand(
             projectId,
             ...(providerId ? { providerId } : {}),
             ...(opts.model ? { model: opts.model } : {}),
-            input: buildPromptInputs({
-              message: opts.prompt,
-              plan: opts.plan,
-              files: opts.file,
-              images: opts.image,
-            }),
+            ...(opts.deferDispatch ? { dispatch: "deferred" } : {}),
+            ...(nativeContext === undefined ? {} : { nativeContext }),
+            ...(configurationGeneration === undefined
+              ? {}
+              : { configurationGeneration }),
+            input: opts.deferDispatch
+              ? []
+              : buildPromptInputs({
+                  message: opts.prompt ?? "",
+                  plan: opts.plan,
+                  files: opts.file,
+                  images: opts.image,
+                }),
             ...(reasoningLevel ? { reasoningLevel } : {}),
             ...(opts.title ? { title: opts.title } : {}),
             ...(serviceTier ? { serviceTier } : {}),

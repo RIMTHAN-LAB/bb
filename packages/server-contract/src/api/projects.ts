@@ -271,6 +271,7 @@ export const providerCommandOriginSchema = z.enum([
   "builtin",
   "project",
   "user",
+  "plugin",
 ]);
 export type ProviderCommandOrigin = z.infer<typeof providerCommandOriginSchema>;
 
@@ -365,6 +366,7 @@ export const skillListResponseSchema = z.object({
 export type SkillListResponse = z.infer<typeof skillListResponseSchema>;
 
 export const projectSkillsQuerySchema = z.object({
+  threadId: z.string().min(1).optional(),
   environmentId: z.preprocess(
     (value) => (value === "" ? null : value),
     z.string().min(1).nullable(),
@@ -392,6 +394,7 @@ export const deleteSkillRequestSchema = z
 export type DeleteSkillRequest = z.infer<typeof deleteSkillRequestSchema>;
 
 export const projectSkillFilesQuerySchema = z.object({
+  threadId: z.string().min(1).optional(),
   skillId: installedSkillIdSchema,
   environmentId: z.preprocess(
     (value) => (value === "" ? null : value),

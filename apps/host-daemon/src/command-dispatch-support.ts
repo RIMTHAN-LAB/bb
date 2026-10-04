@@ -238,6 +238,8 @@ export async function requireWorkspaceEnvironment(
     environmentId: string;
     injectedSkillSources?: readonly HostDaemonInjectedSkillSource[];
     targetThreadId?: string;
+    configurationGeneration?: number;
+    nativeContext?: { homePath: string };
     workspaceContext: WorkspaceContext;
   },
   runtimeManager: RuntimeManager,
@@ -255,6 +257,8 @@ export async function requireWorkspaceEnvironment(
 
   return runtimeManager.ensureEnvironment({
     environmentId: args.environmentId,
+    configurationGeneration: args.configurationGeneration,
+    nativeContext: args.nativeContext,
     ...(args.injectedSkillSources !== undefined
       ? { injectedSkillSources: args.injectedSkillSources }
       : {}),

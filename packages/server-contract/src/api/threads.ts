@@ -28,6 +28,9 @@ import {
   threadEventTypeValues,
   threadVisibilitySchema,
   threadWithRuntimeSchema,
+  nativeContextSchema,
+  threadConfigurationReleaseSchema,
+  threadConfigurationDeliverySchema,
 } from "@bb/domain";
 import type { CallerExecutionInputSource } from "@bb/domain";
 import { THREAD_EVENT_LIST_PAGE_SIZE } from "../common.js";
@@ -102,6 +105,9 @@ export const createThreadRequestSchema = z
     visibility: threadVisibilitySchema.optional(),
     title: z.string().min(1).optional(),
     input: z.array(promptInputSchema),
+    dispatch: z.enum(["immediate", "deferred"]).optional(),
+    nativeContext: nativeContextSchema.optional(),
+    configurationGeneration: z.number().int().nonnegative().optional(),
     model: z.string().min(1).optional(),
     serviceTier: serviceTierSchema.optional(),
     reasoningLevel: reasoningLevelSchema.optional(),
@@ -138,7 +144,21 @@ export const createThreadRequestSchema = z
         path: ["originPluginId"],
       });
     }
-    if (value.originKind === null && value.input.length === 0) {
+    if (
+      value.dispatch === "deferred" &&
+      (value.input.length > 0 || value.sendAt !== undefined)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "deferred dispatch requires empty input and no sendAt",
+        path: ["dispatch"],
+      });
+    }
+    if (
+      value.dispatch !== "deferred" &&
+      value.originKind === null &&
+      value.input.length === 0
+    ) {
       ctx.addIssue({
         code: "custom",
         message: "input must contain at least one entry",
@@ -154,6 +174,23 @@ export const createThreadRequestSchema = z
     }
   });
 export type CreateThreadRequest = z.infer<typeof createThreadRequestSchema>;
+
+export const prepareThreadConfigurationRequestSchema = z
+  .object({
+    configurationGeneration: z.number().int().nonnegative(),
+    timeoutMs: z.number().int().min(1).max(60_000).optional(),
+  })
+  .strict();
+export const releaseThreadConfigurationRequestSchema = z
+  .object({ configurationGeneration: z.number().int().nonnegative() })
+  .strict();
+export type ReleaseThreadConfigurationRequest = z.infer<
+  typeof releaseThreadConfigurationRequestSchema
+>;
+
+export type PrepareThreadConfigurationRequest = z.infer<
+  typeof prepareThreadConfigurationRequestSchema
+>;
 
 const agentOnlyPromptInputSchema = promptInputSchema.and(
   z.object({ visibility: z.literal("agent-only") }),
@@ -447,6 +484,14 @@ export const threadSearchResponseSchema = z
 export type ThreadSearchResponse = z.infer<typeof threadSearchResponseSchema>;
 
 export const threadResponseSchema = threadWithRuntimeSchema.extend({
+  nativeContext: nativeContextSchema.optional(),
+  configurationGeneration: z.number().int().nonnegative().optional(),
+  configurationDelivery: threadConfigurationDeliverySchema.optional(),
+  configurationRelease: threadConfigurationReleaseSchema.nullable().optional(),
+  dispatchReservation: z
+    .object({ expiresAt: z.number().int().nonnegative() })
+    .nullable()
+    .optional(),
   activeBackgroundAgentCount: z.number().int().nonnegative(),
   canSpawnChild: z.boolean(),
   // How many messages are waiting on this thread's queue right now — waiting on
@@ -551,6 +596,9 @@ export const updateThreadRequestSchema = z
     model: z.string().min(1).nullable(),
     reasoningLevel: reasoningLevelSchema.nullable(),
     visibility: threadVisibilitySchema,
+    nativeContext: nativeContextSchema,
+    configurationGeneration: z.number().int().nonnegative(),
+    releaseProviderSession: z.literal(true),
   })
   .partial()
   .refine(
@@ -560,7 +608,9 @@ export const updateThreadRequestSchema = z
       value.parentThreadId !== undefined ||
       value.model !== undefined ||
       value.reasoningLevel !== undefined ||
-      value.visibility !== undefined,
+      value.visibility !== undefined ||
+      value.nativeContext !== undefined ||
+      value.configurationGeneration !== undefined,
     "At least one field must be provided",
   );
 export type UpdateThreadRequest = z.infer<typeof updateThreadRequestSchema>;

@@ -22,6 +22,9 @@ export interface ThreadCreateServiceRequestInput {
    */
   sendAt?: CreateThreadRequest["sendAt"];
   input: PromptInput[];
+  dispatch?: CreateThreadRequest["dispatch"];
+  nativeContext?: CreateThreadRequest["nativeContext"];
+  configurationGeneration?: CreateThreadRequest["configurationGeneration"];
   sectionId?: CreateThreadRequest["sectionId"];
   model?: CreateThreadRequest["model"];
   origin: ThreadCreateOrigin | null;
@@ -42,10 +45,11 @@ export interface ThreadCreateServiceRequestInput {
 
 export interface ThreadCreateServiceRequest extends Omit<
   ThreadCreateServiceRequestInput,
-  "environment" | "providerId"
+  "environment" | "providerId" | "dispatch"
 > {
   environment: EnvironmentArgs | ProviderEnvironmentArgs;
   providerId: string;
   titleFallback: string | null;
   visibility: ThreadVisibility;
+  dispatch: "immediate" | "deferred";
 }

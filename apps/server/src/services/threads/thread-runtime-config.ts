@@ -1,3 +1,4 @@
+import { readThreadProviderConfiguration } from "./thread-provider-configuration.js";
 import {
   resolveHostEnvironment,
   mergeHostAndProviderEnvironment,
@@ -187,6 +188,10 @@ export async function resolveThreadRuntimeCommandConfig(
     pluginSkillRoots,
     skillTreeRegistry: deps.skillTreeRegistry,
   });
+  const providerConfiguration = readThreadProviderConfiguration(
+    deps.db,
+    args.thread.id,
+  );
   const conditionalConfiguration = await resolvePluginAgentConfiguration({
     context: {
       thread: {
@@ -194,6 +199,12 @@ export async function resolveThreadRuntimeCommandConfig(
         title: args.thread.title,
         parentThreadId: args.thread.parentThreadId,
         sourceThreadId: args.thread.sourceThreadId,
+        ...(providerConfiguration === null
+          ? {}
+          : {
+              configurationGeneration: providerConfiguration.generation,
+              nativeContext: providerConfiguration.nativeContext,
+            }),
       },
       project: {
         id: project.id,

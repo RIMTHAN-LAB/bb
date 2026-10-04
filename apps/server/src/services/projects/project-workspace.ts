@@ -1,4 +1,4 @@
-import { getProjectSourceByHost } from "@bb/db";
+import { getProjectSourceByHost, getThread } from "@bb/db";
 import type { ProjectWorkspaceRoutingQuery } from "@bb/server-contract";
 import type { AppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
@@ -18,6 +18,7 @@ interface ProjectWorkspaceTarget {
 
 interface ResolveProjectWorkspaceArgs extends ProjectWorkspaceRoutingQuery {
   projectId: string;
+  threadId?: string;
 }
 
 function requireProjectEnvironment(
@@ -84,6 +85,7 @@ export function resolveProjectWorkspaceTarget(
 }
 
 export interface ProjectCommandWorkspace {
+  threadId?: string;
   hostId: string;
   cwd: string | null;
 }
@@ -92,6 +94,34 @@ export function resolveProjectCommandWorkspace(
   deps: Pick<AppDeps, "config" | "db" | "hub">,
   args: ResolveProjectWorkspaceArgs,
 ): ProjectCommandWorkspace {
+  if (args.threadId !== undefined) {
+    const thread = getThread(deps.db, args.threadId);
+    if (
+      thread === null ||
+      thread.projectId !== args.projectId ||
+      thread.archivedAt !== null ||
+      thread.deletedAt !== null ||
+      thread.environmentId === null ||
+      (args.environmentId !== undefined &&
+        args.environmentId !== thread.environmentId)
+    )
+      throw new ApiError(
+        404,
+        "thread_not_found",
+        "Exact thread workspace not found",
+      );
+    const environment = requireProjectEnvironment(deps, {
+      environmentId: thread.environmentId,
+      projectId: args.projectId,
+      ready: true,
+    });
+    assertUsableHostId(deps, { hostId: environment.hostId });
+    return {
+      threadId: thread.id,
+      hostId: environment.hostId,
+      cwd: environment.path,
+    };
+  }
   if (args.environmentId !== undefined) {
     const environment = requireProjectEnvironment(deps, {
       environmentId: args.environmentId,

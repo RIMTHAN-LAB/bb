@@ -1279,6 +1279,7 @@ const READ_EXPERIMENTAL_PROVIDER_DECLARATION_FIELDS: ReadonlySet<string> =
     "experimental_nativeSkillRoots",
     "experimental_nativeCommandRoots",
     "experimental_resolvesNativeRoots",
+    "experimental_supportsNativeContext",
   ]);
 
 const RENAMED_PROVIDER_FIELDS_SDK_VERSION = "0.4.16";
@@ -1554,6 +1555,15 @@ export function validatePluginProviderDeclaration(
     );
   }
   const deriveProviderOptions = declaration.deriveProviderOptions;
+  const supportsNativeContext = declaration.experimental_supportsNativeContext;
+  if (
+    supportsNativeContext !== undefined &&
+    typeof supportsNativeContext !== "boolean"
+  ) {
+    throw new Error(
+      `provider "${id}" experimental_supportsNativeContext must be a boolean`,
+    );
+  }
   if (
     deriveProviderOptions !== undefined &&
     typeof deriveProviderOptions !== "function"
@@ -1594,6 +1604,9 @@ export function validatePluginProviderDeclaration(
       ? {}
       : { experimental_nativeCommandRoots: nativeCommandRoots }),
     experimental_resolvesNativeRoots: resolvesNativeRoots ?? false,
+    ...(supportsNativeContext === undefined
+      ? {}
+      : { experimental_supportsNativeContext: supportsNativeContext }),
     ...(deriveProviderOptions === undefined
       ? {}
       : { deriveProviderOptions: deriveProviderOptions }),
