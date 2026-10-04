@@ -215,4 +215,113 @@ describe.skipIf(process.platform === "win32")("owned smoke process teardown", ()
       liveWriterNotConcealed: true,
     });
   });
+
+  it("waits through transient zero-signal permission errors until the real group disappears", async () => {
+    const result = await runFixture(`
+      const { ref, pid } = await startFamily("graceful");
+      let interrupted = false;
+      let deniedProbes = 0;
+      let disappearanceObserved = false;
+      process.kill = (target, signal) => {
+        if (target === -ref.groupId && signal === "SIGINT") interrupted = true;
+        if (target === -ref.groupId && signal === 0 && interrupted && deniedProbes < 4) {
+          deniedProbes += 1;
+          throw Object.assign(new Error("probe permission denied"), { code: "EPERM" });
+        }
+        try { return originalKill(target, signal); }
+        catch (error) {
+          if (target === -ref.groupId && signal === 0 && error.code === "ESRCH") disappearanceObserved = true;
+          throw error;
+        }
+      };
+      await manager.stopManagedProcess(ref, { ...timeouts, interruptTimeoutMs: 400 });
+      assert.equal(deniedProbes, 4);
+      assert.equal(disappearanceObserved, true);
+      assert.ok(ref.childProcess.exitCode !== null || ref.childProcess.signalCode !== null);
+      assert.equal(exists(pid), false);
+      assert.equal(exists(-ref.groupId), false);
+      assert.equal(readFileSync(join(root, "late-write"), "utf8"), "observed");
+      await manager.cleanupTemporaryRoot(timeouts);
+      assert.equal(existsSync(root), false);
+      console.log(JSON.stringify({ transientProbesWaited: true, realDisappearanceObserved: true, launcherReaped: true, lateWriteFinished: true, temporaryRootRemoved: true }));
+    `);
+    expect(result).toMatchObject({
+      transientProbesWaited: true,
+      realDisappearanceObserved: true,
+      launcherReaped: true,
+      lateWriteFinished: true,
+      temporaryRootRemoved: true,
+    });
+  });
+
+  it("retains the root after persistent zero-signal permission uncertainty despite real process exit", async () => {
+    const result = await runFixture(`
+      const { ref, pid } = await startFamily("graceful");
+      writeFileSync(join(root, "protected-data"), "keep");
+      let deniedProbes = 0;
+      const signals = [];
+      process.kill = (target, signal) => {
+        if (target === -ref.groupId && signal === 0) {
+          deniedProbes += 1;
+          throw Object.assign(new Error("probe permission denied"), { code: "EPERM" });
+        }
+        if (target === -ref.groupId) signals.push(signal);
+        return originalKill(target, signal);
+      };
+      const shortTimeouts = { interruptTimeoutMs: 250, terminateTimeoutMs: 50, killTimeoutMs: 50 };
+      const started = performance.now();
+      await assert.rejects(manager.stopManagedProcess(ref, shortTimeouts), /Could not prove/);
+      assert.ok(performance.now() - started < 1_000);
+      assert.ok(deniedProbes > 1);
+      assert.deepEqual(signals, ["SIGINT", "SIGTERM", "SIGKILL"]);
+      assert.ok(ref.childProcess.exitCode !== null || ref.childProcess.signalCode !== null);
+      assert.equal(exists(pid), false);
+      assert.equal(exists(-ref.groupId), false);
+      assert.equal(readFileSync(join(root, "late-write"), "utf8"), "observed");
+      await assert.rejects(manager.cleanupTemporaryRoot(shortTimeouts), (error) => error.message.includes("retained owned temporary root " + root));
+      assert.deepEqual(signals, ["SIGINT", "SIGTERM", "SIGKILL"]);
+      assert.equal(readFileSync(join(root, "protected-data"), "utf8"), "keep");
+      console.log(JSON.stringify({ persistentUncertaintyRefused: true, boundedRefusal: true, realProcessesExited: true, rootRetained: true, noRepeatedSignals: true }));
+    `);
+    expect(result).toMatchObject({
+      persistentUncertaintyRefused: true,
+      boundedRefusal: true,
+      realProcessesExited: true,
+      rootRetained: true,
+      noRepeatedSignals: true,
+    });
+  });
+
+  it("propagates real signal permission denial and retains the live writer's root", async () => {
+    const result = await runFixture(`
+      const { ref, pid } = await startFamily("resistant");
+      writeFileSync(join(root, "protected-data"), "keep");
+      const permissionError = Object.assign(new Error("signal permission denied"), { code: "EPERM" });
+      const signals = [];
+      process.kill = (target, signal) => {
+        if (target === -ref.groupId && signal !== 0) {
+          signals.push(signal);
+          throw permissionError;
+        }
+        return originalKill(target, signal);
+      };
+      await assert.rejects(manager.stopManagedProcess(ref, timeouts), (error) => error === permissionError);
+      await assert.rejects(manager.stopManagedProcess(ref, timeouts), (error) => error === permissionError);
+      await assert.rejects(manager.cleanupTemporaryRoot(timeouts), (error) =>
+        error.message.includes("retained owned temporary root " + root) &&
+        error.cause instanceof AggregateError && error.cause.errors[0] === permissionError
+      );
+      assert.deepEqual(signals, ["SIGINT"]);
+      assert.equal(readFileSync(join(root, "protected-data"), "utf8"), "keep");
+      assert.equal(exists(pid), true);
+      assert.equal(exists(-ref.groupId), true);
+      console.log(JSON.stringify({ signalPermissionErrorPreserved: true, liveWriterNotConcealed: true, rootRetained: true, noRepeatedSignals: true }));
+    `);
+    expect(result).toMatchObject({
+      signalPermissionErrorPreserved: true,
+      liveWriterNotConcealed: true,
+      rootRetained: true,
+      noRepeatedSignals: true,
+    });
+  });
 });

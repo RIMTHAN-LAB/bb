@@ -52,6 +52,9 @@ function groupExists(groupId) {
     if (error instanceof Error && "code" in error && error.code === "ESRCH") {
       return false;
     }
+    if (error instanceof Error && "code" in error && error.code === "EPERM") {
+      return true;
+    }
     throw error;
   }
 }

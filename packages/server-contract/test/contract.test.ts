@@ -105,6 +105,17 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
   },
   {
     reason:
+      "Thread creation defaults dispatch to immediate; deferred reserves an empty pending thread for later preparation. Omitting nativeContext selects no exact-thread custom native home, and its instructionsConfig and mcpConfig references are absent when no protected file of that kind is selected. Omitting configurationGeneration leaves the thread unmanaged unless nativeContext is supplied, in which case the server initializes generation 0.",
+    fields: [
+      "createThreadRequestSchema.dispatch",
+      "createThreadRequestSchema.nativeContext",
+      "createThreadRequestSchema.nativeContext.instructionsConfig",
+      "createThreadRequestSchema.nativeContext.mcpConfig",
+      "createThreadRequestSchema.configurationGeneration",
+    ],
+  },
+  {
+    reason:
       "Fork creation requires only a source thread; all other fields either select an optional behavior or receive an explicit server-boundary default.",
     fields: [
       "forkThreadRequestSchema.agentContextSeed",
@@ -203,6 +214,17 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "updateThreadRequestSchema.reasoningLevel",
       "updateThreadRequestSchema.title",
       "updateThreadRequestSchema.visibility",
+    ],
+  },
+  {
+    reason:
+      "Thread PATCH omission preserves stored nativeContext and configurationGeneration; a supplied replacement nativeContext omits instructionsConfig or mcpConfig when no protected file of that kind is selected. releaseProviderSession is explicit authorization required to advance an existing session's configuration, and is omitted for initial, unchanged or ordinary metadata updates; it is not a standalone release request.",
+    fields: [
+      "updateThreadRequestSchema.nativeContext",
+      "updateThreadRequestSchema.nativeContext.instructionsConfig",
+      "updateThreadRequestSchema.nativeContext.mcpConfig",
+      "updateThreadRequestSchema.configurationGeneration",
+      "updateThreadRequestSchema.releaseProviderSession",
     ],
   },
   {
