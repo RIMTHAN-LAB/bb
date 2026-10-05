@@ -96,6 +96,10 @@ import {
 } from "../threads/thread-startup-store.js";
 import { advanceThreadProvisioning } from "../threads/thread-provisioning.js";
 import {
+  requireThreadWorkspaceOwner,
+  type ThreadWorkspaceOwner,
+} from "../threads/thread-workspace-owner.js";
+import {
   finalizeStoppedThreadInTransaction,
   requestThreadStopForCurrentState,
 } from "../threads/thread-lifecycle.js";
@@ -330,6 +334,7 @@ async function runCreate(
   provisioning: EnvironmentRow,
   context: ProviderOperationContext,
   outerSignal: AbortSignal,
+  workspacePreparation?: ReservedWorkspacePreparation,
 ): Promise<void> {
   const signal = outerSignal;
   let changed = false;
@@ -395,8 +400,13 @@ async function runCreate(
         const { dataDir } = await ensureHostSessionReadyForWork(deps, {
           hostId: context.host.id,
         });
-        deps.db.transaction(
-          () => {
+        provisioning = deps.db.transaction(
+          (tx) => {
+            if (workspacePreparation !== undefined) {
+              requireThreadWorkspaceOwner(deps, workspacePreparation.owner, tx);
+              if (producedPath !== workspacePreparation.owner.workspacePath)
+                throw new Error("Reserved workspace provider returned a different path");
+            }
             const refusal = foreignProviderOwnedPathRefusal(deps.db, {
               dataDir,
               hostId: context.host.id,
@@ -430,11 +440,21 @@ async function runCreate(
                 `Workspace ${producedPath} is owned by the "${existing.environmentProviderId}" environment provider (plugin "${existing.environmentProviderPluginId ?? "unknown"}").`,
               );
             }
-            provisioning = bindEnvironmentPath(
+            if (
+              workspacePreparation !== undefined &&
+              existing !== null &&
+              existing.id !== provisioning.id &&
+              (existing.status !== "ready" || existing.ownerThreadId !== null || existing.teardownStatus !== null)
+            )
+              throw new Error("The shared reserved workspace is not ready for attachment");
+            const bound = bindEnvironmentPath(
               deps.db,
               provisioning,
               producedPath,
             );
+            if (workspacePreparation !== undefined && bound.id !== provisioning.id)
+              workspacePreparation.attachReady(tx, bound);
+            return bound;
           },
           { behavior: "immediate" },
         );
@@ -548,12 +568,53 @@ export function markProviderEnvironmentAttached(
     .run();
 }
 
+export async function attachProviderEnvironmentToThread(
+  deps: Deps,
+  args: {
+    environment: EnvironmentRow;
+    threadId: string;
+    admit: (tx: DbTransaction) => boolean | void;
+  },
+): Promise<void> {
+  await withEnvironmentPathAdmission(
+    deps,
+    { ...args.environment, threadId: args.threadId },
+    () => deps.db.transaction((tx) => attachProviderEnvironmentToThreadInTransaction(deps, tx, args), { behavior: "immediate" }),
+  );
+}
+
+export function attachProviderEnvironmentToThreadInTransaction(
+  deps: Deps,
+  tx: DbTransaction,
+  args: {
+    environment: EnvironmentRow;
+    threadId: string;
+    admit: (tx: DbTransaction) => boolean | void;
+  },
+): void {
+  if (args.admit(tx) === false) return;
+  const current = getEnvironment(tx, args.environment.id);
+  if (
+    current === null ||
+    current.attempt !== args.environment.attempt ||
+    current.ownerThreadId !== args.environment.ownerThreadId ||
+    current.teardownStatus !== null ||
+    (current.status !== "ready" && current.status !== "provisioning")
+  )
+    throw new Error("Environment attachment is no longer current");
+  assertEnvironmentPathAvailable(deps, { ...current, threadId: args.threadId });
+  updateThread(tx, deps.hub, args.threadId, { environmentId: current.id });
+  markProviderEnvironmentAttached(tx, args.threadId, current.id);
+}
+
 export async function cancelProviderEnvironmentCreation(
   deps: Deps,
   threadId: string,
+  expected?: { environmentId: string; attempt: number },
 ): Promise<void> {
   const row = getPreparingEnvironment(deps.db, threadId);
   if (row === null) return;
+  if (expected !== undefined && (row.id !== expected.environmentId || row.attempt !== expected.attempt)) return;
   if (row.teardownStatus === "removed") {
     if (row.status !== "destroyed")
       writeEnvironment(deps, row.id, { status: "destroyed" });
@@ -568,6 +629,7 @@ export async function cancelProviderEnvironmentCreation(
   }
   await sweepProviderEnvironment(deps, row.id);
   let current = getPreparingEnvironment(deps.db, threadId);
+  if (expected !== undefined && current !== null && (current.id !== expected.environmentId || current.attempt !== expected.attempt)) return;
   if (current !== null && current.id !== row.id) {
     await sweepProviderEnvironment(deps, current.id);
     current = getPreparingEnvironment(deps.db, threadId);
@@ -916,6 +978,11 @@ interface EnvironmentProvisionTransactionDeps extends EnvironmentProvisionWriteD
   pendingInteractions: AppDeps["pendingInteractions"];
 }
 
+interface ReservedWorkspacePreparation {
+  owner: ThreadWorkspaceOwner;
+  attachReady: (tx: DbTransaction, environment: EnvironmentRow) => void;
+}
+
 interface AdvanceEnvironmentProvisioningArgs {
   removal?: boolean;
   threadId?: string;
@@ -925,6 +992,7 @@ interface AdvanceEnvironmentProvisioningArgs {
   };
   environmentId: string | null | undefined;
   request?: EnvironmentProvisionRequest | null;
+  workspacePreparation?: ReservedWorkspacePreparation;
 }
 
 interface SettleEnvironmentProvisionCommandResultArgs {
@@ -1514,6 +1582,11 @@ export async function advanceEnvironmentProvisioning(
   if (!args.environmentId) return;
   let environment = getEnvironment(deps.db, args.environmentId);
   if (environment === null) return;
+  if (args.workspacePreparation !== undefined) {
+    requireThreadWorkspaceOwner(deps, args.workspacePreparation.owner);
+    if (environment.ownerThreadId !== args.workspacePreparation.owner.threadId || environment.hostId !== args.workspacePreparation.owner.hostId)
+      throw new Error("Reserved workspace preparation does not own this environment");
+  }
   const map = operations(environmentOperations, deps.db);
   if (
     args.threadId !== undefined &&
@@ -1603,7 +1676,7 @@ export async function advanceEnvironmentProvisioning(
           return;
         }
         if (creation === null) return;
-        await runCreate(deps, record, row, creation, signal);
+        await runCreate(deps, record, row, creation, signal, args.workspacePreparation);
       },
     });
     void operation.done
@@ -1644,7 +1717,7 @@ export async function advanceEnvironmentProvisioning(
     environment = getEnvironment(deps.db, environment.id)!;
   }
   const threadId = environment.ownerThreadId ?? args.threadId;
-  if (threadId !== undefined && threadId !== null) {
+  if (threadId !== undefined && threadId !== null && args.workspacePreparation === undefined) {
     const context = getThreadProvisionContext(deps.db, threadId);
     if (context === null) return;
     const target = environment;
@@ -1658,16 +1731,15 @@ export async function advanceEnvironmentProvisioning(
         hostId: target.hostId,
         path: target.path,
       });
-    await withEnvironmentPathAdmission(deps, { ...target, threadId }, () =>
-      deps.db.transaction(
-        (tx) => {
+    await attachProviderEnvironmentToThread(deps, {
+      environment: target,
+      threadId,
+      admit: (tx) => {
           if (
             getThreadProvisionContext(tx, threadId)?.state.provisioningId !==
             context.state.provisioningId
           )
-            return;
-          updateThread(tx, deps.hub, threadId, { environmentId: target.id });
-          markProviderEnvironmentAttached(tx, threadId, target.id);
+            return false;
           context.request.environmentIntent = {
             type: "reuse",
             environmentId: target.id,
@@ -1679,15 +1751,13 @@ export async function advanceEnvironmentProvisioning(
             threadId,
             context,
           });
-        },
-        { behavior: "immediate" },
-      ),
-    );
+      },
+    });
     environment = getEnvironment(deps.db, environment.id);
     if (environment === null || environment.ownerThreadId !== null) return;
   }
   if (environment.status === "ready") {
-    if (threadId != null && args.threadId === undefined)
+    if (threadId != null && args.threadId === undefined && args.workspacePreparation === undefined)
       void advanceThreadProvisioning(deps, { threadId });
     return;
   }
@@ -1708,6 +1778,8 @@ export async function advanceEnvironmentProvisioning(
     return;
   }
   const row = environment;
+  if (args.workspacePreparation !== undefined)
+    requireThreadWorkspaceOwner(deps, args.workspacePreparation.owner);
   runTrackedOperation({
     kind: "attach",
     map,

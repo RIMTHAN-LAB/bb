@@ -175,6 +175,18 @@ export const createThreadRequestSchema = z
   });
 export type CreateThreadRequest = z.infer<typeof createThreadRequestSchema>;
 
+export const prepareThreadWorkspaceRequestSchema = z
+  .object({
+    reservationExpiresAt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    expectedHostId: z.string().min(1),
+    expectedWorkspacePath: z.string().min(1).startsWith("/").refine((path) => !path.includes("\0")),
+    timeoutMs: z.number().int().min(1).max(60_000).optional(),
+  })
+  .strict();
+export type PrepareThreadWorkspaceRequest = z.infer<
+  typeof prepareThreadWorkspaceRequestSchema
+>;
+
 export const prepareThreadConfigurationRequestSchema = z
   .object({
     configurationGeneration: z.number().int().nonnegative(),

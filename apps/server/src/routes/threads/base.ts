@@ -65,6 +65,7 @@ import {
   releaseThreadConfiguration,
   updateThreadProviderConfiguration,
 } from "../../services/threads/thread-configuration-prepare.js";
+import { prepareThreadWorkspace } from "../../services/threads/thread-workspace-prepare.js";
 
 function parseThreadIncludes(query: ThreadGetQuery): Set<ThreadIncludeOption> {
   const includes = new Set<ThreadIncludeOption>();
@@ -390,6 +391,15 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
   get(routes.childSummary, (context) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     return context.json(getThreadChildSummary(thread.id));
+  });
+
+  post(routes.prepareWorkspace, async (context, payload) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    await prepareThreadWorkspace(deps, thread.id, payload);
+    return context.json(buildThreadResponse(deps, {
+      thread: requirePublicThread(deps.db, thread.id),
+      includes: new Set(["environment", "host"]),
+    }));
   });
 
   post(routes.releaseConfiguration, async (context, payload) => {

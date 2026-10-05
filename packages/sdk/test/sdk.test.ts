@@ -1213,6 +1213,14 @@ describe("@bb/sdk", () => {
     });
   });
 
+  it("prepares the reserved workspace using only its exact lease and placement expectations", async () => {
+    const queue = createFetchQueue([{ body: { id: "thr_reserved", environmentId: "env_actual" } }]);
+    const sdk = createBbSdk({ transport: createHttpTransport({ baseUrl: "http://bb.test", fetch: queue.fetch, runtime: "node" }) });
+    const result = await sdk.threads.prepareWorkspace({ threadId: "thr_reserved", reservationExpiresAt: 300_001, expectedHostId: "host-exact", expectedWorkspacePath: "/workspace/exact", timeoutMs: 2000 });
+    expect(result).toEqual({ id: "thr_reserved", environmentId: "env_actual" });
+    expect(queue.requests.map((request) => [request.method, request.url, JSON.parse(request.bodyText!)])).toEqual([["POST", "http://bb.test/api/v1/threads/thr_reserved/workspace/prepare", { reservationExpiresAt: 300_001, expectedHostId: "host-exact", expectedWorkspacePath: "/workspace/exact", timeoutMs: 2000 }]]);
+  });
+
   it("uses exact generation-fenced configuration release and preparation routes", async () => {
     const queue = createFetchQueue([
       { body: { id: "thr_bound" } },

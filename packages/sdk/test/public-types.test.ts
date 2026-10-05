@@ -391,6 +391,7 @@ type ExpectedThreadsKey =
   | "pin"
   | "promptHistory"
   | "prepareConfiguration"
+  | "prepareWorkspace"
   | "releaseConfiguration"
   | "queue"
   | "queuedMessages"

@@ -226,6 +226,14 @@ project source; the selected environment must be ready.
 
 Use `bb thread spawn --project <id> --provider <id> --defer-dispatch --json` to obtain the exact thread ID without a provider turn. SDK callers use `threads.spawn({ ..., input: [], dispatch: "deferred" })`. Install any host-owned binding before sending the first prompt through the ordinary `bb thread send` or SDK send API. Deferred creation forbids initial input and `sendAt`. The reservation expires after five minutes; an expired first send is refused and the server archives still-pending reservations, including after restart. The default immediate creation behavior is unchanged.
 
+For a deferred existing-host unmanaged request, use
+`bb thread prepare-workspace ID --reservation-expires-at EPOCH_MS --expected-host HOST --expected-workspace PATH --timeout-ms 30000 --json`
+before binding configuration. It compares the existing reservation and stored
+host/path, prepares only the workspace through its environment provider, and
+returns actual expanded environment/host. No provider session or input starts.
+Ready replay preserves native state; it does not renew the lease or retry an
+errored environment. SDK: `threads.prepareWorkspace`.
+
 Use `bb thread prepare ID --generation N --timeout-ms 30000 --json` after
 installing the exact host binding. It prepares the native session without a model
 turn. Inspect `configurationDelivery.providerReadback`; delivered status alone

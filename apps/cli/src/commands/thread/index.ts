@@ -11,6 +11,7 @@ import { registerSpawnCommand } from "./spawn.js";
 import { registerForkCommand } from "./fork.js";
 import { registerWaitCommand } from "./wait.js";
 import { registerPrepareConfigurationCommand } from "./prepare.js";
+import { registerPrepareWorkspaceCommand } from "./workspace.js";
 
 export function registerThreadCommands(
   program: Command,
@@ -20,6 +21,7 @@ export function registerThreadCommands(
   registerWaitCommand(thread, getUrl);
   registerSpawnCommand(thread, getUrl);
   registerPrepareConfigurationCommand(thread, getUrl);
+  registerPrepareWorkspaceCommand(thread, getUrl);
   registerForkCommand(thread, getUrl);
   registerListCommand(thread, getUrl);
   registerCountCommand(thread, getUrl);

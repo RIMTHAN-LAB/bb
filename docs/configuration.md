@@ -1,5 +1,19 @@
 # Configuration
 
+Deferred existing-host unmanaged threads initially retain only their validated
+placement intent and finite dispatch reservation. `threads.prepareWorkspace`
+(`POST /threads/:id/workspace/prepare`, or `bb thread prepare-workspace`) prepares
+the workspace through the existing environment provider before native binding.
+The exact reservation expiry, expected host and expected absolute workspace path
+are comparisons against stored authority; they cannot select a new placement.
+The response includes actual environment and host runtime evidence. The timeout
+defaults to 30 seconds, is limited to 60 seconds, and never exceeds the remaining
+five-minute lease. No provider session, model turn, native files or input start.
+Ready replay preserves native configuration/session state; expired, consumed,
+adoption or mismatched reservations are refused without renewal. Failed workspace
+creation exits through existing owned cancellation; replay does not create a new
+environment attempt.
+
 The packaged `npx bb-app` flow stores persistent package settings under
 `~/.bb/config.json`, provider environment values under `~/.bb/env.json`, and
 client SSH target mappings under `~/.bb/client.json`.

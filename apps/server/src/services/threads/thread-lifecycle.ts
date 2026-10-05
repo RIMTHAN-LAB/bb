@@ -1,5 +1,5 @@
 import { ApiError } from "../../errors.js";
-import { advanceEnvironmentProvisioning } from "../environments/environment-engine.js";
+import { advanceEnvironmentProvisioning, cancelProviderEnvironmentCreation } from "../environments/environment-engine.js";
 import { revokeThreadDesktopBrowserControl } from "../desktop-browsers.js";
 import { recordThreadConfigurationDelivery } from "./thread-provider-configuration.js";
 import {
@@ -26,6 +26,7 @@ import {
   environments,
   events,
   getEnvironment,
+  getPreparingEnvironment,
   getLatestThreadInterruptedReason,
   getThread,
   listThreadIdsWithLatestHostDaemonRestartInterruption,
@@ -1245,6 +1246,9 @@ function requestPreStartThreadStop(
   deps: RequestThreadStopForCurrentStateDeps,
   thread: RequestThreadStopForCurrentStateThread,
 ): void {
+  const reservedWorkspace = thread.status === "pending"
+    ? getPreparingEnvironment(deps.db, thread.id)
+    : null;
   // Stopping a thread abandons the provisioning anything was waiting on, so
   // those waits end here. This runs outside the transaction below because
   // clearing a wait notifies, and it runs first so no row is left waiting on
@@ -1339,6 +1343,11 @@ function requestPreStartThreadStop(
     { behavior: "immediate" },
   );
   notificationBuffer.flushInto(deps.hub);
+  if (result.finalized && reservedWorkspace !== null)
+    void cancelProviderEnvironmentCreation(deps, thread.id, {
+      environmentId: reservedWorkspace.id,
+      attempt: reservedWorkspace.attempt,
+    }).catch((error) => deps.logger.warn({ threadId: thread.id, error }, "Reserved workspace cancellation will retry"));
   if (result.abandonedProvider !== null) {
     cancelEnvironmentProviderCreation(deps, {
       ...result.abandonedProvider,
