@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseModelsResponse } from "./models.js";
+import { mapBbReasoningLevelToCodex, parseModelsResponse } from "./models.js";
 
 describe("parseModelsResponse", () => {
   it("parses a live-shaped Codex payload with max and ultra", () => {
@@ -242,5 +242,15 @@ describe("parseModelsResponse", () => {
         }),
       ).toEqual([{ id: "fast" }]);
     });
+  });
+});
+
+describe("mapBbReasoningLevelToCodex", () => {
+  it("passes none through as an explicit Codex effort", () => {
+    expect(mapBbReasoningLevelToCodex("none")).toBe("none");
+  });
+
+  it("returns null for ultracode, which Codex has no effort for", () => {
+    expect(mapBbReasoningLevelToCodex("ultracode")).toBeNull();
   });
 });

@@ -147,7 +147,7 @@ describe("appendCustomModels", () => {
       codexModels[0].supportedReasoningEfforts.map(
         (effort) => effort.reasoningEffort,
       ),
-    ).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+    ).toEqual(["none", "low", "medium", "high", "xhigh", "max", "ultra"]);
 
     const { models: piModels } = appendCustomModels(registry, {
       customModels: [{ providerId: "pi", model: "custom-model" }],
