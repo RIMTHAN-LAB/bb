@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resolveAppServerLaunch } from "./bridge.js";
+import { buildAppServerEnv, resolveAppServerLaunch } from "./bridge.js";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -60,4 +60,32 @@ describe("Codex Account Pool isolation", () => {
       );
     },
   );
+});
+
+describe("Codex app-server environment", () => {
+  it("carries the thread identity so tools the app-server launches can bind per thread", () => {
+    vi.stubEnv("BB_THREAD_ID", "thr_daemon");
+    vi.stubEnv("BB_SERVER_URL", "http://127.0.0.1:1");
+    const env = buildAppServerEnv({
+      BB_THREAD_ID: "thr_one",
+      BB_ENVIRONMENT_ID: "env_one",
+      BB_PROJECT_ID: "proj_one",
+      BB_THREAD_STORAGE: "/tmp/thr_one",
+      BB_UNRELATED: "kept-out",
+    });
+    expect(env).toMatchObject({
+      BB_THREAD_ID: "thr_one",
+      BB_ENVIRONMENT_ID: "env_one",
+      BB_PROJECT_ID: "proj_one",
+      BB_THREAD_STORAGE: "/tmp/thr_one",
+    });
+    expect(env).not.toHaveProperty("BB_UNRELATED");
+    expect(env).not.toHaveProperty("BB_SERVER_URL");
+  });
+
+  it("gives a child without a thread no thread identity", () => {
+    vi.stubEnv("BB_THREAD_ID", "thr_daemon");
+    const env = buildAppServerEnv(undefined);
+    expect(env).not.toHaveProperty("BB_THREAD_ID");
+  });
 });

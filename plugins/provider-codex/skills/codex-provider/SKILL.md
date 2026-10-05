@@ -23,5 +23,10 @@ tier to Codex as given. When the model does not list it, Codex runs the turn
 at its default tier and the thread shows its warning that the tier "is not
 advertised as supported" and was omitted.
 
+Each thread runs its own Codex app-server. Its environment carries the
+thread's `BB_THREAD_ID`, `BB_ENVIRONMENT_ID`, `BB_PROJECT_ID` and
+`BB_THREAD_STORAGE`, so a stdio MCP server that lists them in its `env_vars`
+can act on the calling thread; shell commands see them too.
+
 Use the core CLI skill for command syntax and official Codex guidance for
 upstream product behavior.

@@ -395,14 +395,26 @@ function appServerLaunchEnv(
   };
 }
 
-function buildAppServerEnv(
+const THREAD_IDENTITY_ENV_KEYS = [
+  "BB_THREAD_ID",
+  "BB_ENVIRONMENT_ID",
+  "BB_PROJECT_ID",
+  "BB_THREAD_STORAGE",
+] as const;
+
+export function buildAppServerEnv(
   envVars: Readonly<Record<string, string>> | undefined,
 ): NodeJS.ProcessEnv {
-  return withoutBridgeRuntimeEnv(
+  const env = withoutBridgeRuntimeEnv(
     sanitizeInheritedChildProcessEnv({
       env: appServerLaunchEnv(envVars),
     }),
   );
+  for (const key of THREAD_IDENTITY_ENV_KEYS) {
+    const value = envVars?.[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
 }
 
 function isCodexSpawnFailure(error: unknown): boolean {
