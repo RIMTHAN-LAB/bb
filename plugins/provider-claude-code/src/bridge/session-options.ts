@@ -60,6 +60,21 @@ const SUMMARIZED_ADAPTIVE_THINKING = {
   display: "summarized",
 } satisfies Exclude<Options["thinking"], undefined>;
 const CLAUDE_CODE_EXECUTABLE_ENV = "BB_CLAUDE_CODE_EXECUTABLE";
+const CLAUDE_CODE_SETTING_SOURCES_ENV = "BB_CLAUDE_CODE_SETTING_SOURCES";
+const CLAUDE_CODE_SETTING_SOURCES = ["user", "project", "local"] as const;
+type ClaudeSettingSource = (typeof CLAUDE_CODE_SETTING_SOURCES)[number];
+
+export function resolveClaudeSettingSources(
+  env: NodeJS.ProcessEnv,
+): ClaudeSettingSource[] {
+  const named = (env[CLAUDE_CODE_SETTING_SOURCES_ENV] ?? "")
+    .split(",")
+    .map((source) => source.trim());
+  const sources = CLAUDE_CODE_SETTING_SOURCES.filter((source) =>
+    named.includes(source),
+  );
+  return sources.length > 0 ? sources : [...CLAUDE_CODE_SETTING_SOURCES];
+}
 
 export function toSdkEffort(
   reasoningLevel: ReasoningLevel,

@@ -27,9 +27,11 @@ with `bb plugin config provider-claude-code set <key> <value>`.
   bb runs Claude Code's Bash commands in its sandbox. Set it to `false` to use
   Claude Code's own command approvals and sandbox settings instead. A change
   restarts the thread's Claude process before its next turn, preserving context.
-- bb passes only `BB_CLAUDE_CODE_EXECUTABLE` and `CLAUDE_CODE_OAUTH_TOKEN` to
-  the CLI. Mint the token with `claude setup-token` for machines with no
-  interactive login.
+- bb passes only `BB_CLAUDE_CODE_EXECUTABLE`, `BB_CLAUDE_CODE_SETTING_SOURCES`
+  and `CLAUDE_CODE_OAUTH_TOKEN` to the provider. Mint the token with
+  `claude setup-token` for machines with no interactive login.
+  `BB_CLAUDE_CODE_SETTING_SOURCES=user` stops a checkout's `.claude` project
+  and local settings from loading; unset keeps `user,project,local`.
 - Structured plan, message editing, and compaction are supported through the
   corresponding `bb thread` commands. Unlisted model IDs are accepted by the
   provider; verify actual availability on the target host.

@@ -1508,12 +1508,17 @@ the plugin so it can be surfaced as needing attention.
 
 ### Claude Code provider
 
-bb forwards only two environment variables to the Claude Code CLI, stripping
-every other. `BB_CLAUDE_CODE_EXECUTABLE` picks the `claude` binary;
+bb forwards only three environment variables to the Claude Code provider,
+stripping every other. `BB_CLAUDE_CODE_EXECUTABLE` picks the `claude` binary;
 `CLAUDE_CODE_OAUTH_TOKEN` authenticates it on a machine with no interactive
 login, such as a CI runner. Mint the token with `claude setup-token`, which is
 long-lived where the credentials from `/login` are not. A logged-in machine
-needs neither.
+needs neither. `BB_CLAUDE_CODE_SETTING_SOURCES` narrows the settings files a
+session loads to a comma list of `user`, `project` and `local`; unset, or naming
+none of them, keeps all three. Set it to `user` on a machine that runs agents in
+repositories you do not trust, so a checkout's `.claude/settings.json` and
+`.claude/settings.local.json` (hooks, permission rules, env) never load.
+Managed settings always load.
 
 ### Provider retry plugin
 

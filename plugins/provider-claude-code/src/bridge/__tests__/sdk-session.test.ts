@@ -186,6 +186,39 @@ describe("SdkSession", () => {
     );
   });
 
+  it("loads the user, project and local settings by default", () => {
+    const session = new SdkSession(defaultOptions, vi.fn(), vi.fn());
+
+    session.start();
+
+    expect(queryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          settingSources: ["user", "project", "local"],
+        }),
+      }),
+    );
+  });
+
+  it("narrows the settings cascade to BB_CLAUDE_CODE_SETTING_SOURCES", () => {
+    const session = new SdkSession(
+      {
+        ...defaultOptions,
+        env: { BB_CLAUDE_CODE_SETTING_SOURCES: "user" },
+      },
+      vi.fn(),
+      vi.fn(),
+    );
+
+    session.start();
+
+    expect(queryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({ settingSources: ["user"] }),
+      }),
+    );
+  });
+
   it("passes non-bypass permission modes through without the dangerous skip flag", () => {
     const onMessage = vi.fn();
     const onDone = vi.fn();

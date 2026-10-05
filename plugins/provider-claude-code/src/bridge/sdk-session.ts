@@ -20,6 +20,7 @@ import {
   missingClaudeCliGuidance,
   translateMissingClaudeCliError,
 } from "./missing-cli-error.js";
+import { resolveClaudeSettingSources } from "./session-options.js";
 
 export interface SdkSessionOptions {
   cwd: string;
@@ -253,7 +254,9 @@ export class SdkSession {
           }
         : {}),
       includePartialMessages: true,
-      settingSources: ["user", "project", "local"],
+      settingSources: resolveClaudeSettingSources(
+        this.options.env ?? process.env,
+      ),
       persistSession: true,
       env: this.options.env ?? process.env,
       stderr: onStderr,

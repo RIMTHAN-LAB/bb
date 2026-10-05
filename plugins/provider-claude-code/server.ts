@@ -97,7 +97,11 @@ export default function plugin(bb: BbPluginApi) {
     composerActions: ["plan"],
     completedTurnDisplay: "flat",
     env: {
-      passthrough: ["BB_CLAUDE_CODE_EXECUTABLE", "CLAUDE_CODE_OAUTH_TOKEN"],
+      passthrough: [
+        "BB_CLAUDE_CODE_EXECUTABLE",
+        "BB_CLAUDE_CODE_SETTING_SOURCES",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+      ],
     },
     models: { scope: "host" },
     deriveProviderOptions(context) {
