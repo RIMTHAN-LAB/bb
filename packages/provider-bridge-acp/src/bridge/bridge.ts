@@ -85,6 +85,7 @@ import {
   acknowledgedAcpInstructionContributionDigest,
   buildAcpModelListParams,
   buildAcpSessionParams,
+  refreshAcpConfigurationReadback,
   type AcpAgentCommandParam,
   type AcpModelListParams,
   type AcpSessionParams,
@@ -1981,6 +1982,68 @@ async function startAgentSession(
                 1_048_576,
               )
             ).toString("utf8");
+      const hermesReadbackSchema = z
+        .object({
+          sessionId: z.string().min(1),
+          generation: z.number().int().nonnegative(),
+          skills: providerConfigurationReadbackSchema.shape.skills,
+          instructions: providerConfigurationReadbackSchema.shape.instructions,
+          nativeInstructions:
+            providerConfigurationReadbackSchema.shape.nativeInstructions,
+          nativeMcp: providerConfigurationReadbackSchema.shape.nativeMcp,
+          nativeConversation:
+            providerConfigurationReadbackSchema.shape.nativeConversation,
+          nativeToolNames:
+            providerConfigurationReadbackSchema.shape.nativeToolNames,
+        })
+        .strict();
+      // The acknowledgement and every later re-read are held to the same
+      // exact-session, generation and byte-exact instruction rules.
+      const acceptHermesReadback = (
+        configured: z.infer<typeof hermesReadbackSchema>,
+      ): import("@bb/domain").ProviderConfigurationReadback => {
+        const contributionDigest =
+          configured.instructions.status === "observed"
+            ? acknowledgedAcpInstructionContributionDigest(
+                params,
+                configured.instructions.instructionsDigest,
+              )
+            : undefined;
+        if (
+          configured.sessionId !== sessionId ||
+          configured.generation !== params.configurationGeneration ||
+          configured.instructions.status !== "observed" ||
+          contributionDigest === undefined
+        )
+          throw new Error(
+            "Hermes native configuration acknowledgement does not match this exact session",
+          );
+        if (
+          nativeInstructions !== undefined &&
+          (configured.nativeInstructions.status !== "observed" ||
+            configured.nativeInstructions.nativeInstructionsDigest !==
+              createHash("sha256").update(nativeInstructions).digest("hex"))
+        )
+          throw new Error(
+            "Hermes native instruction acknowledgement does not match the exact protected file",
+          );
+        return {
+          ...UNAVAILABLE_PROVIDER_CONFIGURATION_READBACK,
+          skills: configured.skills,
+          instructions: {
+            ...configured.instructions,
+            instructionsDigest: contributionDigest,
+          },
+          nativeInstructions: configured.nativeInstructions,
+          nativeMcp: configured.nativeMcp,
+          ...(configured.nativeConversation === undefined
+            ? {}
+            : { nativeConversation: configured.nativeConversation }),
+          ...(configured.nativeToolNames === undefined
+            ? {}
+            : { nativeToolNames: configured.nativeToolNames }),
+        };
+      };
       const configured = await connection.request({
         method: "_hermes/session/configure",
         params: {
@@ -1989,65 +2052,46 @@ async function startAgentSession(
           instructions: params.instructions ?? "",
           ...(nativeInstructions === undefined ? {} : { nativeInstructions }),
         },
-        resultSchema: z
-          .object({
-            sessionId: z.string().min(1),
-            generation: z.number().int().nonnegative(),
-            skills: providerConfigurationReadbackSchema.shape.skills,
-            instructions:
-              providerConfigurationReadbackSchema.shape.instructions,
-            nativeInstructions:
-              providerConfigurationReadbackSchema.shape.nativeInstructions,
-            nativeMcp: providerConfigurationReadbackSchema.shape.nativeMcp,
-            nativeConversation:
-              providerConfigurationReadbackSchema.shape.nativeConversation,
-            nativeToolNames:
-              providerConfigurationReadbackSchema.shape.nativeToolNames,
-          })
-          .strict(),
+        resultSchema: hermesReadbackSchema,
       });
-      const contributionDigest =
-        configured.instructions.status === "observed"
-          ? acknowledgedAcpInstructionContributionDigest(
-              params,
-              configured.instructions.instructionsDigest,
-            )
-          : undefined;
-      if (
-        configured.sessionId !== sessionId ||
-        configured.generation !== params.configurationGeneration ||
-        configured.instructions.status !== "observed" ||
-        contributionDigest === undefined
-      )
-        throw new Error(
-          "Hermes native configuration acknowledgement does not match this exact session",
-        );
-      if (
-        nativeInstructions !== undefined &&
-        (configured.nativeInstructions.status !== "observed" ||
-          configured.nativeInstructions.nativeInstructionsDigest !==
-            createHash("sha256").update(nativeInstructions).digest("hex"))
-      )
-        throw new Error(
-          "Hermes native instruction acknowledgement does not match the exact protected file",
-        );
-      session.configurationReadback = {
-        ...UNAVAILABLE_PROVIDER_CONFIGURATION_READBACK,
-        skills: configured.skills,
-        instructions: {
-          ...configured.instructions,
-          instructionsDigest: contributionDigest,
-        },
-        nativeInstructions: configured.nativeInstructions,
-        nativeMcp: configured.nativeMcp,
-        ...(configured.nativeConversation === undefined
-          ? {}
-          : { nativeConversation: configured.nativeConversation }),
-        ...(configured.nativeToolNames === undefined
-          ? {}
-          : { nativeToolNames: configured.nativeToolNames }),
-      };
+      const acknowledgedAt = Date.now();
+      session.configurationReadback = acceptHermesReadback(configured);
       session.pendingInstructions = undefined;
+      // A required native MCP server that is still connecting at the
+      // acknowledgement is re-read (`_hermes/session/configuration`, a
+      // side-effect-free readback of the same session) until every server is
+      // terminal or the bound elapses, so the delivery this start reports
+      // carries the server's settled status.
+      const currentSessionId = sessionId;
+      await refreshAcpConfigurationReadback({
+        acknowledged: session.configurationReadback,
+        acknowledgedAt,
+        read: async () => {
+          let reread: z.infer<typeof hermesReadbackSchema>;
+          try {
+            reread = await connection.request({
+              method: "_hermes/session/configuration",
+              params: { sessionId: currentSessionId },
+              resultSchema: hermesReadbackSchema,
+            });
+          } catch {
+            return undefined;
+          }
+          return acceptHermesReadback(reread);
+        },
+        isActive: () => !session.stopping && !connection.exited,
+        onChange: (readback) => {
+          session.configurationReadback = readback;
+        },
+        now: Date.now,
+        sleep: (ms) =>
+          new Promise<void>((resolveSleep) => setTimeout(resolveSleep, ms)),
+      });
+      if (session.stopping) {
+        throw new Error(
+          `ACP session for thread "${bbThreadId}" was released during construction`,
+        );
+      }
     }
     bbThreadIdByProviderThreadId.set(sessionId, bbThreadId);
     sendNotification(BRIDGE_NOTIFICATION_METHODS.threadIdentity, {

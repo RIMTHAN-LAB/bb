@@ -1,11 +1,13 @@
 import type {
   DynamicTool,
   PermissionMode,
+  ProviderConfigurationReadback,
   ReasoningLevel,
   ServiceTier,
 } from "@bb/domain";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   ACP_DEFAULT_MODEL_ID,
@@ -166,6 +168,89 @@ export function acknowledgedAcpInstructionContributionDigest(
   )
     return undefined;
   return sha256Hex(parts.contribution);
+}
+
+// A provider's native configuration readback is taken at its configuration
+// acknowledgement. A native MCP server that is still "connecting" then is the
+// only non-terminal status; every other status (connected, disabled, failed,
+// lazy, configured) is terminal. The bridge re-reads the provider's readback on
+// a bounded cadence while any server is connecting, so a server that connects
+// shortly after the acknowledgement is observed connected in the readback the
+// delivery carries instead of staying pending forever.
+export const ACP_CONFIGURATION_REFRESH_INTERVAL_MS = 2_500;
+export const ACP_CONFIGURATION_REFRESH_BOUND_MS = 60_000;
+
+export function acpNativeMcpReadbackConnecting(
+  nativeMcp: ProviderConfigurationReadback["nativeMcp"],
+): boolean {
+  return (
+    nativeMcp.status === "observed" &&
+    nativeMcp.servers.some((server) => server.status === "connecting")
+  );
+}
+
+export interface RefreshAcpConfigurationReadbackArgs<
+  TReadback extends Pick<ProviderConfigurationReadback, "nativeMcp">,
+> {
+  /** The readback recorded at the acknowledgement. */
+  acknowledged: TReadback;
+  /** Clock reading taken at the acknowledgement; the bound runs from it. */
+  acknowledgedAt: number;
+  /**
+   * One side-effect-free provider re-read, already held to the
+   * acknowledgement's exact-session and instruction rules. It throws when the
+   * provider contradicts them and resolves undefined when the read itself
+   * failed, which ends the refresh on the last readback.
+   */
+  read: () => Promise<TReadback | undefined>;
+  /** False once the session is stopping or the provider exited. */
+  isActive: () => boolean;
+  /** Called with each readback that differs from the previous one. */
+  onChange: (readback: TReadback) => void;
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+  intervalMs?: number;
+  boundMs?: number;
+}
+
+export interface RefreshAcpConfigurationReadbackResult<TReadback> {
+  readback: TReadback;
+  reads: number;
+  changes: number;
+  /** True when every native MCP server in the readback is terminal. */
+  settled: boolean;
+}
+
+export async function refreshAcpConfigurationReadback<
+  TReadback extends Pick<ProviderConfigurationReadback, "nativeMcp">,
+>(
+  args: RefreshAcpConfigurationReadbackArgs<TReadback>,
+): Promise<RefreshAcpConfigurationReadbackResult<TReadback>> {
+  const intervalMs = args.intervalMs ?? ACP_CONFIGURATION_REFRESH_INTERVAL_MS;
+  const deadline =
+    args.acknowledgedAt + (args.boundMs ?? ACP_CONFIGURATION_REFRESH_BOUND_MS);
+  let readback = args.acknowledged;
+  let reads = 0;
+  let changes = 0;
+  while (acpNativeMcpReadbackConnecting(readback.nativeMcp)) {
+    const remaining = deadline - args.now();
+    if (remaining <= 0) break;
+    await args.sleep(Math.min(intervalMs, remaining));
+    if (!args.isActive() || args.now() > deadline) break;
+    const next = await args.read();
+    reads += 1;
+    if (next === undefined) break;
+    if (isDeepStrictEqual(next, readback)) continue;
+    readback = next;
+    changes += 1;
+    args.onChange(readback);
+  }
+  return {
+    readback,
+    reads,
+    changes,
+    settled: !acpNativeMcpReadbackConnecting(readback.nativeMcp),
+  };
 }
 
 function launchEnvVars(launchSpec: AcpLaunchSpec): {
