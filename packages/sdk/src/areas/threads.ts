@@ -14,6 +14,7 @@ import {
 import {
   DEFAULT_TURN_RETRY_REASON,
   prepareThreadConfigurationRequestSchema,
+  prepareThreadWorkspaceRequestSchema,
   releaseThreadConfigurationRequestSchema,
   threadTabsResponseSchema,
   updateThreadRequestSchema,
@@ -22,6 +23,7 @@ import type {
   CreateQueuedMessageRequest,
   CreateThreadRequest,
   PrepareThreadConfigurationRequest,
+  PrepareThreadWorkspaceRequest,
   ReleaseThreadConfigurationRequest,
   QueuedMessageListQuery,
   EditMessageRequest,
@@ -245,6 +247,9 @@ export interface ThreadUpdateArgs extends UpdateThreadRequest {
   threadId: string;
 }
 export interface ThreadPrepareConfigurationArgs extends PrepareThreadConfigurationRequest {
+  threadId: string;
+}
+export interface ThreadPrepareWorkspaceArgs extends PrepareThreadWorkspaceRequest {
   threadId: string;
 }
 export type ThreadReleaseConfigurationArgs =
@@ -590,6 +595,9 @@ export interface ThreadsArea {
   prepareConfiguration(
     args: ThreadPrepareConfigurationArgs,
   ): Promise<ThreadMutationResult>;
+  prepareWorkspace(
+    args: ThreadPrepareWorkspaceArgs,
+  ): Promise<ThreadWithIncludesResponse>;
   stop(args: ThreadActionArgs): Promise<ThreadStopResult>;
   tabs: ThreadTabsArea;
   timeline(args: ThreadTimelineArgs): Promise<ThreadTimelineResult>;
@@ -1259,6 +1267,15 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
         transport.api.v1.threads[":id"].configuration.release.$post({
           param: { id: threadId },
           json: releaseThreadConfigurationRequestSchema.parse(json),
+        }),
+      );
+    },
+    async prepareWorkspace(input) {
+      const { threadId, ...json } = input;
+      return transport.readJson(
+        transport.api.v1.threads[":id"].workspace.prepare.$post({
+          param: { id: threadId },
+          json: prepareThreadWorkspaceRequestSchema.parse(json),
         }),
       );
     },

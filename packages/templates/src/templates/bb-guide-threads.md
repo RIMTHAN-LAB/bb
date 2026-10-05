@@ -412,12 +412,20 @@ Mutating thread lifecycle and messaging commands require an explicit ID or --sel
 
 Managed provider preparation:
 
+  bb thread prepare-workspace <thread-id> --reservation-expires-at <epoch-ms> --expected-host <host-id> --expected-workspace <path> [--timeout-ms <1..60000>] --json
   bb thread prepare <thread-id> --generation <n> [--timeout-ms <1..60000>] [--adoption-attempt <id>] --json
   bb thread release-configuration <thread-id> --generation <current-n> --json
 
   Preparation creates or restores a provider session without a model prompt.
   Check the future dispatchReservation returned by deferred create/GET before
-  installing a host binding. Preparation preserves that five-minute reservation
+  installing a host binding. A deferred existing-host unmanaged request initially
+  has no environment. prepare-workspace uses its validated stored intent to attach
+  the actual workspace without an agent session, configuration, input or turn.
+  The expected host/path and lease are comparisons, never placement overrides.
+  Its response includes actual environment and host. Ready replay reads the same
+  workspace even after native preparation; expiry/consumption forbids replay.
+  It never renews the five-minute lease or retries a failed environment.
+  Provider preparation preserves that five-minute reservation
   until the first nonempty ordinary send. Configuration readback says delivered;
   each required native capability needs its own observed provider acknowledgement.
   Unavailable evidence does not establish application.

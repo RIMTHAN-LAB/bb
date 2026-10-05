@@ -1,5 +1,5 @@
 import { ApiError } from "../../errors.js";
-import { advanceEnvironmentProvisioning } from "../environments/environment-engine.js";
+import { advanceEnvironmentProvisioning, cancelProviderEnvironmentCreation } from "../environments/environment-engine.js";
 import { revokeThreadDesktopBrowserControl } from "../desktop-browsers.js";
 import { recordThreadConfigurationDelivery } from "./thread-provider-configuration.js";
 import {
@@ -26,10 +26,12 @@ import {
   environments,
   events,
   getEnvironment,
+  getPreparingEnvironment,
   getLatestThreadInterruptedReason,
   getThread,
   listThreadIdsWithLatestHostDaemonRestartInterruption,
   listThreadTurnInterruptionEventStates,
+  threadDispatchReservations,
   threads,
   type DbNotifier,
   type DbQueryConnection,
@@ -107,6 +109,8 @@ import {
 import { cancelEnvironmentProviderCreation } from "./thread-environment-providers.js";
 import { scheduleThreadProvisioningAdvance } from "./thread-provisioning.js";
 import { isPreStartThreadStatus } from "./thread-status.js";
+import { readDispatchReservation } from "./thread-reservations.js";
+import { isPristinePendingThreadWorkspace } from "./thread-workspace-owner.js";
 import { settleDanglingBackgroundTasksForStoppedThreadInTransaction } from "./background-task-reconciliation.js";
 
 type ThreadStartCommand = Awaited<ReturnType<typeof buildThreadStartCommand>>;
@@ -1245,6 +1249,9 @@ function requestPreStartThreadStop(
   deps: RequestThreadStopForCurrentStateDeps,
   thread: RequestThreadStopForCurrentStateThread,
 ): void {
+  const reservedWorkspace = thread.status === "pending"
+    ? getPreparingEnvironment(deps.db, thread.id)
+    : null;
   // Stopping a thread abandons the provisioning anything was waiting on, so
   // those waits end here. This runs outside the transaction below because
   // clearing a wait notifies, and it runs first so no row is left waiting on
@@ -1268,6 +1275,35 @@ function requestPreStartThreadStop(
           cancelHostId: null,
           environmentId: null,
           finalized: true,
+        };
+      }
+
+      if (
+        currentThread.status === "pending" &&
+        currentThread.environmentId === null
+      ) {
+        const reservation = readDispatchReservation(tx, currentThread.id);
+        const ordinaryReservation =
+          reservation !== null &&
+          !("purpose" in reservation) &&
+          isPristinePendingThreadWorkspace(tx, currentThread.id);
+        if (ordinaryReservation)
+          tx.update(threadDispatchReservations)
+            .set({ expiresAt: Math.min(reservation.expiresAt, Date.now()) })
+            .where(and(
+              eq(threadDispatchReservations.threadId, currentThread.id),
+              eq(threadDispatchReservations.expiresAt, reservation.expiresAt),
+              isNull(threadDispatchReservations.adoption),
+            ))
+            .run();
+        return {
+          abandonedProvider: null,
+          cancelHostId: null,
+          environmentId: null,
+          finalized:
+            ordinaryReservation ||
+            currentThread.archivedAt !== null ||
+            currentThread.deletedAt !== null,
         };
       }
 
@@ -1339,6 +1375,11 @@ function requestPreStartThreadStop(
     { behavior: "immediate" },
   );
   notificationBuffer.flushInto(deps.hub);
+  if (result.finalized && reservedWorkspace !== null)
+    void cancelProviderEnvironmentCreation(deps, thread.id, {
+      environmentId: reservedWorkspace.id,
+      attempt: reservedWorkspace.attempt,
+    }).catch((error) => deps.logger.warn({ threadId: thread.id, error }, "Reserved workspace cancellation will retry"));
   if (result.abandonedProvider !== null) {
     cancelEnvironmentProviderCreation(deps, {
       ...result.abandonedProvider,
@@ -1382,6 +1423,7 @@ export function requestThreadStopForCurrentState(
   }
 
   if (
+    (thread.status === "pending" && thread.environmentId === null) ||
     isPreStartThreadStatus(thread.status) ||
     thread.status === "stopping" ||
     hasActiveThreadProvisioningContext(deps, thread.id)
@@ -1398,6 +1440,10 @@ export async function stopThreadForCurrentState(
 ): Promise<void> {
   if (options?.requireStopped)
     requireNativeHostRuntime(deps, environment?.hostId ?? null);
+  if (thread.status === "pending" && thread.environmentId === null) {
+    requestPreStartThreadStop(deps, thread);
+    return;
+  }
   await revokeThreadDesktopBrowserControl(deps, thread.id);
   const hasLiveRuntime =
     thread.status === "active" ||

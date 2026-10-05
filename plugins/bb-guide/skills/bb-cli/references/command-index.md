@@ -125,6 +125,7 @@ configures the machine with optional configured `preset` and `image` names;
 - `bb thread spawn`
 - `bb thread release-configuration`
 - `bb thread prepare`
+- `bb thread prepare-workspace`
 - `bb thread fork`
 - `bb thread list`
 - `bb thread show`

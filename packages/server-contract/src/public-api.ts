@@ -285,6 +285,8 @@ import {
   queuedMessageListQuerySchema,
   updateQueuedMessageRequestSchema,
   createThreadRequestSchema,
+  prepareThreadWorkspaceRequestSchema,
+  type PrepareThreadWorkspaceRequest,
   prepareThreadConfigurationRequestSchema,
   releaseThreadConfigurationRequestSchema,
   type ReleaseThreadConfigurationRequest,
@@ -1165,6 +1167,14 @@ export const publicApiRoutes = {
         createThreadRequestSchema,
       ),
       response: jsonResponse<ThreadResponse>({ status: 201 }),
+    }),
+    prepareWorkspace: defineRoute({
+      path: "/threads/:id/workspace/prepare",
+      method: "post",
+      request: jsonRequest<PathId, PrepareThreadWorkspaceRequest>(
+        prepareThreadWorkspaceRequestSchema,
+      ),
+      response: jsonResponse<ThreadWithIncludesResponse>(),
     }),
     releaseConfiguration: defineRoute({
       path: "/threads/:id/configuration/release",

@@ -228,6 +228,7 @@ const OPTIONAL_SERVER_FIELD_GROUPS: readonly OptionalServerFieldGroup[] = [
       "updateThreadRequestSchema.adoptionAttemptId",
       "prepareThreadConfigurationRequestSchema.adoptionAttemptId",
       "prepareThreadConfigurationRequestSchema.timeoutMs",
+      "prepareThreadWorkspaceRequestSchema.timeoutMs",
       "releaseThreadConfigurationRequestSchema.recoverAdoption.expectedNativeContext.instructionsConfig",
       "releaseThreadConfigurationRequestSchema.recoverAdoption.expectedNativeContext.mcpConfig",
     ],
@@ -1937,6 +1938,8 @@ describe("server-contract clients", () => {
       updateThreadRequestSchema: contract.updateThreadRequestSchema,
       prepareThreadConfigurationRequestSchema:
         contract.prepareThreadConfigurationRequestSchema,
+      prepareThreadWorkspaceRequestSchema:
+        contract.prepareThreadWorkspaceRequestSchema,
       releaseThreadConfigurationRequestSchema:
         contract.releaseThreadConfigurationRequestSchema,
       uploadedPromptAttachmentSchema: contract.uploadedPromptAttachmentSchema,

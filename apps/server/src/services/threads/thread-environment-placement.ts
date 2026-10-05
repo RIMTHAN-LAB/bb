@@ -1196,7 +1196,7 @@ export function prepareProviderEnvironment(
     row.path !== null
   )
     return { action: "ready", environment: row };
-  if (row.status === "creating")
+  if (row.status === "creating" && options.advance !== false)
     void advanceEnvironmentProvisioning(deps, {
       environmentId: row.id,
       creation: {
