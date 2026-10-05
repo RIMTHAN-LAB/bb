@@ -1,6 +1,7 @@
 import { getEventListeners } from "node:events";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import type { PluginProviderOptionsContext } from "@get-bb/plugin-sdk";
 import { experimental_acpAgentProbeSchema } from "@get-bb/plugin-sdk/provider-bridge/acp";
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { z } from "zod";
@@ -78,6 +79,74 @@ async function loadPlugin(options: {
 }
 
 describe("the ACP plugin's registrations", () => {
+  it("binds the shipped Hermes native home and generation for each thread", async () => {
+    const agent = KNOWN_ACP_AGENTS.find(
+      (entry) => entry.launch.command === "hermes",
+    );
+    if (agent === undefined) throw new Error("expected the shipped Hermes agent");
+    expect(agent.id).toBe("acp-hermes-agent");
+
+    const host = await loadPlugin({});
+    const declaration = host.harness.registrations.providerRegistrations.find(
+      (entry) => entry.id === agent.id,
+    );
+    expect(declaration?.experimental_supportsNativeContext).toBe(true);
+    const derive = declaration?.deriveProviderOptions;
+    if (derive === undefined) throw new Error("expected Hermes provider options");
+
+    const context: PluginProviderOptionsContext = {
+      threadId: "thread-a",
+      projectId: "project-a",
+      model: "custom:router:gpt-6.1-sol",
+      permissionMode: "full",
+      settings: {},
+    };
+    expect(derive(context)).toEqual({});
+
+    for (const [threadId, homePath, generation] of [
+      ["thread-a", "/profiles/a", 0],
+      ["thread-b", "/profiles/b", 7],
+      ["thread-a", "/profiles/a", 0],
+    ] as const) {
+      const nativeContext = {
+        homePath,
+        mcpConfig: { path: `${homePath}/mcp.json`, sha256: "a".repeat(64) },
+        instructionsConfig: {
+          path: `${homePath}/instructions.txt`,
+          sha256: "b".repeat(64),
+        },
+      };
+      expect(
+        derive({
+          ...context,
+          threadId,
+          nativeContext,
+          configurationGeneration: generation,
+        }),
+      ).toEqual({
+        acpLaunchSpec: {
+          ...agent.launch,
+          env: { ...agent.launch.env, HERMES_HOME: homePath },
+        },
+        acpNativeContext: nativeContext,
+        acpConfigurationGeneration: generation,
+      });
+    }
+    expect(derive(context)).toEqual({});
+  });
+
+  it("keeps native context unsupported for other shipped ACP agents", async () => {
+    const host = await loadPlugin({});
+    for (const agent of KNOWN_ACP_AGENTS) {
+      if (agent.launch.command === "hermes") continue;
+      const declaration = host.harness.registrations.providerRegistrations.find(
+        (entry) => entry.id === agent.id,
+      );
+      expect(declaration).toBeDefined();
+      expect(declaration?.experimental_supportsNativeContext).toBeUndefined();
+    }
+  });
+
   it("registers every shipped agent, and a configured one beside them", async () => {
     const host = await loadPlugin({
       customAgents: customAgents({
