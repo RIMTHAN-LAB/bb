@@ -51,32 +51,13 @@ import {
   seedTurnStarted,
 } from "../helpers/seed.js";
 import {
-  withTestHarness as withBaseHarness,
+  withTestHarness,
   type TestAppHarness,
 } from "../helpers/test-app.js";
-import { configuredAcpProvider } from "../helpers/provider-registry.js";
-
-async function withTestHarness(
-  run: (harness: TestAppHarness) => Promise<void>,
-) {
-  return withBaseHarness(
-    {
-      extraProviders: [
-        await configuredAcpProvider({
-          id: "hermes",
-          displayName: "Hermes",
-          command: "hermes",
-          args: ["acp"],
-        }),
-      ],
-    },
-    run,
-  );
-}
 
 function legacy(harness: TestAppHarness) {
   const fixture = seedThreadFixture(harness, {
-    thread: { providerId: "acp-hermes" },
+    thread: { providerId: "acp-hermes-agent" },
   });
   const providerSessionId = `native-${randomUUID()}`;
   seedThreadRuntimeState(harness.deps, {
@@ -175,7 +156,7 @@ function delivery(
   return {
     status: "delivered",
     threadId: id,
-    providerId: "acp-hermes",
+    providerId: "acp-hermes-agent",
     providerSessionId,
     providerInstanceId: randomUUID(),
     generation,
