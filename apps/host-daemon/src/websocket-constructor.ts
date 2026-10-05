@@ -1,4 +1,5 @@
 import { WebSocket as NodeWebSocket } from "ws";
+import { proxyAgentFor } from "./env-proxy-agent.js";
 
 interface NodeWebSocketConstructor {
   new (address: string | URL, protocols?: string | string[]): object;
@@ -6,14 +7,15 @@ interface NodeWebSocketConstructor {
 
 export function createNodeWebSocketConstructor(
   headers: Record<string, string> | undefined,
+  env: Record<string, string | undefined> = process.env,
 ): NodeWebSocketConstructor {
-  if (!headers) {
-    return NodeWebSocket;
-  }
-
-  return class HeaderAwareWebSocket extends NodeWebSocket {
+  return class ProxyAwareWebSocket extends NodeWebSocket {
     constructor(address: string | URL, protocols?: string | string[]) {
-      super(address, protocols, { headers });
+      const agent = proxyAgentFor(address, env);
+      super(address, protocols, {
+        ...(headers ? { headers } : {}),
+        ...(agent ? { agent } : {}),
+      });
     }
   };
 }

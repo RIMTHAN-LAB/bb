@@ -911,6 +911,14 @@ from 5 seconds to 5 minutes, and never downgrade a daemon. Settings → Machines
 and `bb machine retry-update <id-or-name>` can bypass the current backoff after
 a transient failure.
 
+A host daemon behind an outbound proxy honours `HTTPS_PROXY`, `HTTP_PROXY` and
+`NO_PROXY` (lowercase names win) for its own connections: the server WebSocket,
+the bb connect tunnel and the machine auth proxy's upstream requests. Only
+`http://` and `https://` proxies are supported; credentials in the proxy URL are
+sent as `Proxy-Authorization`. `NO_PROXY` takes `*`, hosts, `.suffix` and
+`*.suffix` domains, `host:port`, bracketed IPv6 and CIDR ranges. Loopback
+targets always connect directly.
+
 ## Sidebar preferences
 
 Sidebar layout preferences are stored on the server in a keyed registry so

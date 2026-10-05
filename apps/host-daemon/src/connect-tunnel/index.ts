@@ -16,6 +16,7 @@ import {
   type HostDaemonConnectTunnelIdentity,
 } from "@bb/host-daemon-contract";
 import { connectPublicProtocol } from "@bb/connect-client";
+import { proxyAgentFor } from "../env-proxy-agent.js";
 import type { HostDaemonLogger } from "../logger.js";
 
 type ConnectTunnelState = "connected" | "reconnecting" | "offline";
@@ -129,7 +130,10 @@ export class ConnectTunnelClient {
     this.createWebSocket =
       options.createWebSocket ??
       ((url, websocketOptions) =>
-        new NodeWebSocket(url, { headers: websocketOptions.headers }));
+        new NodeWebSocket(url, {
+          headers: websocketOptions.headers,
+          agent: proxyAgentFor(url),
+        }));
     this.fetchFn = options.fetchFn ?? fetch;
     this.backoff = new ReconnectBackoff(options.reconnectBackoff);
     this.machineCredential =

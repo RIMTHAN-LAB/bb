@@ -6,6 +6,7 @@ import http, {
 import https from "node:https";
 import type { AddressInfo, Socket } from "node:net";
 import type { Duplex } from "node:stream";
+import { proxyAgentFor } from "./env-proxy-agent.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
@@ -118,6 +119,7 @@ function openUpstreamRequest(
     port: target.port,
     method: request.method,
     path: request.url,
+    agent: proxyAgentFor(target),
     headers: {
       ...request.headers,
       host: target.host,

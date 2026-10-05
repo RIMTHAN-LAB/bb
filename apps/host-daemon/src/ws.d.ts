@@ -1,12 +1,13 @@
 declare module "ws" {
   import { EventEmitter } from "node:events";
-  import type { IncomingMessage } from "node:http";
+  import type { Agent, IncomingMessage } from "node:http";
   import type { Duplex } from "node:stream";
 
   export type RawData = string | Buffer | ArrayBuffer | Buffer[];
 
   export interface ClientOptions {
     headers?: Record<string, string>;
+    agent?: Agent;
   }
 
   export class WebSocket extends EventEmitter {
