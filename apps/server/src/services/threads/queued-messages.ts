@@ -213,6 +213,7 @@ export async function createQueuedMessageForThread(
 ): Promise<ThreadQueuedMessage> {
   const { payload, thread } = args;
   ensureThreadIsWritable(thread);
+  requireNoThreadConfigurationTransition(thread.id);
   await validatePromptAttachmentReferences({
     dataDir: deps.config.dataDir,
     input: payload.input,

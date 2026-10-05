@@ -23,12 +23,30 @@ export interface ThreadWorkspaceOwner {
   workspacePath: string;
 }
 
+export function isPristinePendingThreadWorkspace(
+  db: LoggedPendingInteractionWorkSessionDeps["db"] | DbTransaction,
+  threadId: string,
+): boolean {
+  const thread = getThread(db, threadId);
+  return (
+    thread !== null &&
+    thread.status === "pending" &&
+    thread.archivedAt === null &&
+    thread.deletedAt === null &&
+    thread.environmentId === null &&
+    getThreadStartupContext(db, threadId) !== null &&
+    readThreadProviderConfiguration(db, threadId) === null &&
+    getLastStoredProviderThreadId(db, threadId) === null &&
+    getLastStoredTurnRequestEvent(db, threadId) === null &&
+    !hasQueuedThreadMessages(db, threadId)
+  );
+}
+
 export function requireThreadWorkspaceOwner(
   deps: LoggedPendingInteractionWorkSessionDeps,
   owner: ThreadWorkspaceOwner,
   db: LoggedPendingInteractionWorkSessionDeps["db"] | DbTransaction = deps.db,
 ): void {
-  const thread = getThread(db, owner.threadId);
   const reservation = readDispatchReservation(db, owner.threadId);
   if (reservation === null || "purpose" in reservation)
     throw new ApiError(
@@ -47,16 +65,8 @@ export function requireThreadWorkspaceOwner(
   if (owner.deadlineAt <= Date.now())
     throw new ApiError(504, "thread_workspace_prepare_timeout", "Reserved workspace preparation timed out");
   if (
-    thread === null ||
-    thread.status !== "pending" ||
-    thread.archivedAt !== null ||
-    thread.deletedAt !== null ||
-    thread.environmentId !== null ||
-    getThreadStartupContext(db, owner.threadId) !== owner.startupContext ||
-    readThreadProviderConfiguration(db, owner.threadId) !== null ||
-    getLastStoredProviderThreadId(db, owner.threadId) !== null ||
-    getLastStoredTurnRequestEvent(db, owner.threadId) !== null ||
-    hasQueuedThreadMessages(db, owner.threadId)
+    !isPristinePendingThreadWorkspace(db, owner.threadId) ||
+    getThreadStartupContext(db, owner.threadId) !== owner.startupContext
   )
     throw new ApiError(
       409,

@@ -594,10 +594,14 @@ export function attachProviderEnvironmentToThreadInTransaction(
 ): void {
   if (args.admit(tx) === false) return;
   const current = getEnvironment(tx, args.environment.id);
+  const attachedReplay =
+    current?.ownerThreadId === null &&
+    args.environment.ownerThreadId === args.threadId &&
+    getThread(tx, args.threadId)?.environmentId === current.id;
   if (
     current === null ||
     current.attempt !== args.environment.attempt ||
-    current.ownerThreadId !== args.environment.ownerThreadId ||
+    (current.ownerThreadId !== args.environment.ownerThreadId && !attachedReplay) ||
     current.teardownStatus !== null ||
     (current.status !== "ready" && current.status !== "provisioning")
   )

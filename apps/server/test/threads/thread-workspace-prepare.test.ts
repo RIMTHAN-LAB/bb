@@ -20,10 +20,10 @@ import { ApiError } from "../../src/errors.js";
 import { advanceEnvironmentProvisioning } from "../../src/services/environments/environment-engine.js";
 import { getCurrentHostRuntimeSession } from "../../src/services/hosts/runtime-capability.js";
 import { getEnvironmentProvider } from "../../src/services/plugins/plugin-environment-provider-registry.js";
-import { prepareProviderEnvironment, resolveProviderOperationContext } from "../../src/services/threads/thread-environment-placement.js";
+import * as environmentPlacement from "../../src/services/threads/thread-environment-placement.js";
 import { readPendingThreadStartContext } from "../../src/services/threads/dispatch-attempt.js";
 import { readThreadConfigurationDelivery, readThreadProviderConfiguration, recordThreadConfigurationDelivery } from "../../src/services/threads/thread-provider-configuration.js";
-import { expireDeferredThreadReservations } from "../../src/services/threads/thread-reservations.js";
+import { expireDeferredThreadReservations, readDispatchReservation } from "../../src/services/threads/thread-reservations.js";
 import { checkoutProviderInputsSchema, installFakeEnvironmentProvider } from "../helpers/environment-provider.js";
 import { listQueuedCommands, listQueuedThreadCommands, reportQueuedCommandError, reportQueuedCommandSuccess, waitForQueuedCommand } from "../helpers/commands.js";
 import { textInput } from "../helpers/prompt-input.js";
@@ -67,7 +67,12 @@ async function reserve(harness: TestAppHarness, providerId = "codex") {
     id: "project-checkout",
     pluginId: "environment-project-checkout",
     displayName: "Project checkout",
-    requires: { projectCheckout: true },
+    requires: {
+      projectCheckout: true,
+      gitCheckout: false,
+      gitRemote: false,
+      projectless: false,
+    },
     inputs: checkoutProviderInputsSchema,
     decide: () => ({ action: "ready", environment: { type: "host", hostId: host.id, path: workspace, ownsPath: false } }),
   });
@@ -157,6 +162,51 @@ describe("reserved workspace preparation", () => {
       expect(threadWithIncludesResponseSchema.parse(await replay.json()).environmentId).toBe(shown.environmentId);
       expect(provider.contexts).toHaveLength(1);
       expect(listQueuedCommands(harness, "environment.attach")).toEqual([]);
+    });
+  });
+
+  it("stops before a preparing row exists without renewing the lease or touching another reservation", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread, host, project, request, provider } = await reserve(harness);
+      const sibling = await reserveOn(harness, { hostId: host.id, projectId: project.id });
+      const startupBefore = getThreadStartupContext(harness.db, thread.id);
+      const started = barrier();
+      const release = barrier();
+      const resolve = environmentPlacement.resolveProviderOperationContext;
+      const spy = vi.spyOn(environmentPlacement, "resolveProviderOperationContext")
+        .mockImplementation(async (...args) => {
+          started.resolve();
+          await release.promise;
+          return resolve(...args);
+        });
+      onTestFinished(() => {
+        release.resolve();
+        spy.mockRestore();
+      });
+      const result = prepare(harness, thread.id, request);
+      await started.promise;
+      expect(getPreparingEnvironment(harness.db, thread.id)).toBeNull();
+      const stop = await harness.app.request(`/api/v1/threads/${thread.id}/stop`, { method: "POST" });
+      expect(stop.status).toBe(200);
+      const expired = readDispatchReservation(harness.db, thread.id);
+      expect(expired?.expiresAt).toBeLessThanOrEqual(Date.now());
+      expect(expired?.expiresAt).toBeLessThan(request.reservationExpiresAt);
+      expect((await harness.app.request(`/api/v1/threads/${thread.id}/stop`, { method: "POST" })).status).toBe(200);
+      expect(readDispatchReservation(harness.db, thread.id)).toEqual(expired);
+      expect(readDispatchReservation(harness.db, sibling.thread.id)).toEqual({ expiresAt: sibling.request.reservationExpiresAt });
+      expect(getThreadStartupContext(harness.db, thread.id)).toBe(startupBefore);
+      expect(getThread(harness.db, thread.id)).toMatchObject({ status: "pending", environmentId: null, archivedAt: null });
+      release.resolve();
+      const response = await result;
+      expect(response.status).toBe(409);
+      expect(await response.text()).toContain("thread_workspace_reservation_stale");
+      expect(provider.contexts).toHaveLength(0);
+      expect(getPreparingEnvironment(harness.db, thread.id)).toBeNull();
+      expect(listQueuedCommands(harness, "environment.attach")).toEqual([]);
+      expect(listQueuedThreadCommands(harness, "thread.start", thread.id)).toEqual([]);
+      expect(expireDeferredThreadReservations(harness.deps, Date.now())).toBe(1);
+      expect(getThread(harness.db, thread.id)?.archivedAt).not.toBeNull();
+      expect(getThread(harness.db, sibling.thread.id)?.archivedAt).toBeNull();
     });
   });
 
@@ -297,9 +347,9 @@ describe("reserved workspace preparation", () => {
       const current = getThread(harness.db, thread.id);
       if (pending?.environmentIntent.type !== "provider" || record === undefined || stored === null || session === null || current === null)
         throw new Error("Expected the exact pending workspace authority");
-      const operation = await resolveProviderOperationContext(harness.deps, current, pending.environmentIntent, record);
+      const operation = await environmentPlacement.resolveProviderOperationContext(harness.deps, current, pending.environmentIntent, record);
       if (operation === null) throw new Error("Expected the existing checkout operation");
-      prepareProviderEnvironment(harness.deps, record, operation, { advance: false });
+      environmentPlacement.prepareProviderEnvironment(harness.deps, record, operation, { advance: false });
       const source = getPreparingEnvironment(harness.db, thread.id);
       if (source === null) throw new Error("Expected the captured private source");
       const target = seedEnvironment(harness.deps, { hostId: host.id, projectId: project.id, path: workspace });
@@ -394,7 +444,7 @@ describe("reserved workspace preparation", () => {
       if (cause === "reconnect") seedSession(harness.deps, host.id);
       else if (cause === "expiry") expireDeferredThreadReservations(harness.deps, request.reservationExpiresAt);
       else {
-        const response = await harness.app.request(`/api/v1/threads/${thread.id}${cause === "stop" ? "/stop" : cause === "archive" ? "/archive-all" : ""}`, { method: cause === "delete" ? "DELETE" : "POST", ...(cause === "delete" ? { headers: { "content-type": "application/json" }, body: "{}" } : {}) });
+        const response = await harness.app.request(`/api/v1/threads/${thread.id}${cause === "stop" ? "/stop" : cause === "archive" ? "/archive-all" : ""}`, { method: cause === "delete" ? "DELETE" : "POST", ...(cause === "delete" ? { headers: { "content-type": "application/json" }, body: JSON.stringify({ childThreadsConfirmed: false }) } : {}) });
         expect(response.status, await response.clone().text()).toBe(200);
       }
       await attachSuccess(harness, queued);

@@ -1938,6 +1938,8 @@ describe("server-contract clients", () => {
       updateThreadRequestSchema: contract.updateThreadRequestSchema,
       prepareThreadConfigurationRequestSchema:
         contract.prepareThreadConfigurationRequestSchema,
+      prepareThreadWorkspaceRequestSchema:
+        contract.prepareThreadWorkspaceRequestSchema,
       releaseThreadConfigurationRequestSchema:
         contract.releaseThreadConfigurationRequestSchema,
       uploadedPromptAttachmentSchema: contract.uploadedPromptAttachmentSchema,

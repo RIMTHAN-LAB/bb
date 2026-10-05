@@ -31,6 +31,7 @@ import {
   getThread,
   listThreadIdsWithLatestHostDaemonRestartInterruption,
   listThreadTurnInterruptionEventStates,
+  threadDispatchReservations,
   threads,
   type DbNotifier,
   type DbQueryConnection,
@@ -108,6 +109,8 @@ import {
 import { cancelEnvironmentProviderCreation } from "./thread-environment-providers.js";
 import { scheduleThreadProvisioningAdvance } from "./thread-provisioning.js";
 import { isPreStartThreadStatus } from "./thread-status.js";
+import { readDispatchReservation } from "./thread-reservations.js";
+import { isPristinePendingThreadWorkspace } from "./thread-workspace-owner.js";
 import { settleDanglingBackgroundTasksForStoppedThreadInTransaction } from "./background-task-reconciliation.js";
 
 type ThreadStartCommand = Awaited<ReturnType<typeof buildThreadStartCommand>>;
@@ -1275,6 +1278,35 @@ function requestPreStartThreadStop(
         };
       }
 
+      if (
+        currentThread.status === "pending" &&
+        currentThread.environmentId === null
+      ) {
+        const reservation = readDispatchReservation(tx, currentThread.id);
+        const ordinaryReservation =
+          reservation !== null &&
+          !("purpose" in reservation) &&
+          isPristinePendingThreadWorkspace(tx, currentThread.id);
+        if (ordinaryReservation)
+          tx.update(threadDispatchReservations)
+            .set({ expiresAt: Math.min(reservation.expiresAt, Date.now()) })
+            .where(and(
+              eq(threadDispatchReservations.threadId, currentThread.id),
+              eq(threadDispatchReservations.expiresAt, reservation.expiresAt),
+              isNull(threadDispatchReservations.adoption),
+            ))
+            .run();
+        return {
+          abandonedProvider: null,
+          cancelHostId: null,
+          environmentId: null,
+          finalized:
+            ordinaryReservation ||
+            currentThread.archivedAt !== null ||
+            currentThread.deletedAt !== null,
+        };
+      }
+
       const hasProvisioningContext =
         currentThread.status === "starting" &&
         hasActiveThreadProvisioningContext(deps, currentThread.id);
@@ -1391,6 +1423,7 @@ export function requestThreadStopForCurrentState(
   }
 
   if (
+    (thread.status === "pending" && thread.environmentId === null) ||
     isPreStartThreadStatus(thread.status) ||
     thread.status === "stopping" ||
     hasActiveThreadProvisioningContext(deps, thread.id)
@@ -1407,6 +1440,10 @@ export async function stopThreadForCurrentState(
 ): Promise<void> {
   if (options?.requireStopped)
     requireNativeHostRuntime(deps, environment?.hostId ?? null);
+  if (thread.status === "pending" && thread.environmentId === null) {
+    requestPreStartThreadStop(deps, thread);
+    return;
+  }
   await revokeThreadDesktopBrowserControl(deps, thread.id);
   const hasLiveRuntime =
     thread.status === "active" ||
