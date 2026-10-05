@@ -8,12 +8,16 @@ import {
 import { SAMPLE_LIST } from "./bridge/model-catalog.fixture.js";
 import { acpLaunchSpecSchema, type AcpLaunchSpec } from "./launch-spec.js";
 import {
+  ACP_CONFIGURATION_REFRESH_BOUND_MS,
+  ACP_CONFIGURATION_REFRESH_INTERVAL_MS,
   acknowledgedAcpInstructionContributionDigest,
   buildAcpModelListParams,
   buildAcpSessionParams,
+  refreshAcpConfigurationReadback,
   type AcpSessionExecutionOptions,
   type AcpSessionParams,
 } from "./session-params.js";
+import type { ProviderConfigurationReadback } from "@bb/domain";
 
 const BASE_OPTIONS = {
   permissionMode: "full",
@@ -629,5 +633,206 @@ describe("acknowledgedAcpInstructionContributionDigest", () => {
     );
     expect(digest).toBe(sha256(host.trim()));
     expect(digest).not.toBe(sha256(host));
+  });
+});
+
+describe("refreshAcpConfigurationReadback", () => {
+  type Status = "connected" | "connecting" | "failed" | "disabled";
+  type Readback = Pick<
+    ProviderConfigurationReadback,
+    "nativeMcp" | "instructions"
+  >;
+  const CONTRIBUTION_DIGEST = createHash("sha256")
+    .update("Read the protected file.")
+    .digest("hex");
+
+  function readback(
+    servers: readonly { name: string; status: Status }[],
+  ): Readback {
+    return {
+      instructions: {
+        status: "observed",
+        protocol: "hermes-acp",
+        instructionsDigest: CONTRIBUTION_DIGEST,
+      },
+      nativeMcp: {
+        status: "observed",
+        protocol: "hermes-acp",
+        servers: servers.map((server) => ({
+          name: server.name,
+          transport: "stdio",
+          status: server.status,
+          toolNames: server.status === "connected" ? ["lookup"] : [],
+        })),
+      },
+    } as Readback;
+  }
+
+  // A fake clock: sleep advances it, reads cost nothing.
+  function harness(readbacks: readonly (Readback | undefined)[]) {
+    let clock = 1_000;
+    const sleeps: number[] = [];
+    const changes: Readback[] = [];
+    let reads = 0;
+    return {
+      sleeps,
+      changes,
+      reads: () => reads,
+      args: {
+        acknowledgedAt: clock,
+        now: () => clock,
+        sleep: async (ms: number) => {
+          sleeps.push(ms);
+          clock += ms;
+        },
+        isActive: () => true,
+        onChange: (next: Readback) => changes.push(next),
+        read: async () => {
+          const next = readbacks[Math.min(reads, readbacks.length - 1)];
+          reads += 1;
+          return next;
+        },
+      },
+    };
+  }
+
+  it("does not re-read when every server is terminal at the acknowledgement", async () => {
+    const acknowledged = readback([
+      { name: "factory", status: "connected" },
+      { name: "optional", status: "failed" },
+    ]);
+    const run = harness([]);
+    const result = await refreshAcpConfigurationReadback({
+      ...run.args,
+      acknowledged,
+    });
+    expect(result).toEqual({
+      readback: acknowledged,
+      reads: 0,
+      changes: 0,
+      settled: true,
+    });
+    expect(run.sleeps).toEqual([]);
+  });
+
+  it("records the readback once when a connecting server connects within the bound", async () => {
+    const connecting = readback([{ name: "factory", status: "connecting" }]);
+    const connected = readback([{ name: "factory", status: "connected" }]);
+    const run = harness([connecting, connecting, connected]);
+    const result = await refreshAcpConfigurationReadback({
+      ...run.args,
+      acknowledged: connecting,
+    });
+    expect(result.readback).toEqual(connected);
+    expect(result).toMatchObject({ reads: 3, changes: 1, settled: true });
+    expect(run.changes).toEqual([connected]);
+    // Same generation's instruction evidence is carried unchanged.
+    expect(result.readback.instructions).toEqual(connecting.instructions);
+    expect(run.sleeps).toEqual([
+      ACP_CONFIGURATION_REFRESH_INTERVAL_MS,
+      ACP_CONFIGURATION_REFRESH_INTERVAL_MS,
+      ACP_CONFIGURATION_REFRESH_INTERVAL_MS,
+    ]);
+  });
+
+  it("keeps the server connecting when it is still connecting at the bound", async () => {
+    const connecting = readback([{ name: "factory", status: "connecting" }]);
+    const run = harness([connecting]);
+    const result = await refreshAcpConfigurationReadback({
+      ...run.args,
+      acknowledged: connecting,
+    });
+    expect(result).toMatchObject({
+      readback: connecting,
+      changes: 0,
+      settled: false,
+    });
+    expect(run.changes).toEqual([]);
+    // Every 2.5 s for 60 s from the acknowledgement, then stop at the bound.
+    expect(result.reads).toBe(
+      ACP_CONFIGURATION_REFRESH_BOUND_MS /
+        ACP_CONFIGURATION_REFRESH_INTERVAL_MS,
+    );
+    expect(run.sleeps.reduce((sum, ms) => sum + ms, 0)).toBe(
+      ACP_CONFIGURATION_REFRESH_BOUND_MS,
+    );
+  });
+
+  it("stops at a terminal failure and records it", async () => {
+    const connecting = readback([{ name: "factory", status: "connecting" }]);
+    const failed = readback([{ name: "factory", status: "failed" }]);
+    const run = harness([failed, connecting]);
+    const result = await refreshAcpConfigurationReadback({
+      ...run.args,
+      acknowledged: connecting,
+    });
+    expect(result).toMatchObject({
+      readback: failed,
+      reads: 1,
+      changes: 1,
+      settled: true,
+    });
+    expect(run.changes).toEqual([failed]);
+  });
+
+  it("keeps refreshing while another server is still connecting", async () => {
+    const both = readback([
+      { name: "factory", status: "connecting" },
+      { name: "slow", status: "connecting" },
+    ]);
+    const oneFailed = readback([
+      { name: "factory", status: "failed" },
+      { name: "slow", status: "connecting" },
+    ]);
+    const settled = readback([
+      { name: "factory", status: "failed" },
+      { name: "slow", status: "connected" },
+    ]);
+    const run = harness([oneFailed, settled]);
+    const result = await refreshAcpConfigurationReadback({
+      ...run.args,
+      acknowledged: both,
+    });
+    expect(result).toMatchObject({
+      readback: settled,
+      reads: 2,
+      changes: 2,
+      settled: true,
+    });
+  });
+
+  it("ends on the last readback when a re-read fails or the session stops", async () => {
+    const connecting = readback([{ name: "factory", status: "connecting" }]);
+    const failedRead = harness([undefined]);
+    expect(
+      await refreshAcpConfigurationReadback({
+        ...failedRead.args,
+        acknowledged: connecting,
+      }),
+    ).toMatchObject({ readback: connecting, reads: 1, settled: false });
+    const stopped = harness([connecting]);
+    expect(
+      await refreshAcpConfigurationReadback({
+        ...stopped.args,
+        isActive: () => false,
+        acknowledged: connecting,
+      }),
+    ).toMatchObject({ readback: connecting, reads: 0, settled: false });
+  });
+
+  it("propagates a re-read that contradicts the acknowledgement", async () => {
+    const connecting = readback([{ name: "factory", status: "connecting" }]);
+    const run = harness([connecting]);
+    await expect(
+      refreshAcpConfigurationReadback({
+        ...run.args,
+        acknowledged: connecting,
+        read: async () => {
+          throw new Error(
+            "Hermes native configuration acknowledgement does not match this exact session",
+          );
+        },
+      }),
+    ).rejects.toThrow("does not match this exact session");
   });
 });
