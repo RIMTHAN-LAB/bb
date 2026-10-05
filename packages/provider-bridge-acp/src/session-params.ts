@@ -4,6 +4,7 @@ import type {
   ReasoningLevel,
   ServiceTier,
 } from "@bb/domain";
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 import {
@@ -79,6 +80,7 @@ export interface AcpSessionParams {
   workspaceWriteRoots: string[];
   envVars?: Record<string, string>;
   instructions?: string;
+  instructionParts?: AcpSessionInstructionParts;
   dynamicTools?: readonly DynamicTool[];
 }
 
@@ -90,6 +92,11 @@ function sanitizeAcpSkillDescription(description: string): string {
     .trim();
   return sanitized.length > 0 ? sanitized : "(description unavailable)";
 }
+
+const ACP_SKILLS_PREAMBLE =
+  "bb skills are reusable instruction folders. When the current task matches a listed skill description, read that skill's SKILL.md at the absolute path before proceeding; you may read supporting files in the same skill directory that SKILL.md references. If a listed path does not exist, the list is stale and should be ignored.";
+
+const ACP_SKILLS_LISTING_PREFIX = `${ACP_SKILLS_PREAMBLE}\n\nAvailable bb skills:\n- `;
 
 function buildAcpSkillsInstructions(
   skillRoots: readonly AcpSkillRoot[] | undefined,
@@ -112,23 +119,53 @@ function buildAcpSkillsInstructions(
     return undefined;
   }
 
-  return [
-    "bb skills are reusable instruction folders. When the current task matches a listed skill description, read that skill's SKILL.md at the absolute path before proceeding; you may read supporting files in the same skill directory that SKILL.md references. If a listed path does not exist, the list is stale and should be ignored.",
-    "",
-    "Available bb skills:",
-    ...skillLines,
-  ].join("\n");
+  return [ACP_SKILLS_PREAMBLE, "", "Available bb skills:", ...skillLines].join(
+    "\n",
+  );
 }
 
-function buildAcpSessionInstructions(
+export interface AcpSessionInstructionParts {
+  contribution: string;
+  skills?: string;
+}
+
+function buildAcpSessionInstructionParts(
   options: AcpSessionExecutionOptions,
+): AcpSessionInstructionParts | undefined {
+  const contribution = options.instructions?.trim() ?? "";
+  const skills = buildAcpSkillsInstructions(options.skillRoots);
+  if (contribution.length === 0 && skills === undefined) return undefined;
+  return { contribution, ...(skills === undefined ? {} : { skills }) };
+}
+
+export function composeAcpSessionInstructions(
+  parts: AcpSessionInstructionParts,
+): string {
+  return [parts.contribution, parts.skills]
+    .filter((value): value is string => value !== undefined && value.length > 0)
+    .join("\n\n");
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+export function acknowledgedAcpInstructionContributionDigest(
+  params: Pick<AcpSessionParams, "instructions" | "instructionParts">,
+  acknowledgedDigest: string,
 ): string | undefined {
-  const baseInstructions = options.instructions?.trim();
-  const skillsInstructions = buildAcpSkillsInstructions(options.skillRoots);
-  const instructions = [baseInstructions, skillsInstructions].filter(
-    (value): value is string => value !== undefined && value.length > 0,
-  );
-  return instructions.length > 0 ? instructions.join("\n\n") : undefined;
+  const delivered = params.instructions ?? "";
+  if (acknowledgedDigest !== sha256Hex(delivered)) return undefined;
+  const parts = params.instructionParts;
+  if (parts === undefined)
+    return delivered === "" ? acknowledgedDigest : undefined;
+  if (composeAcpSessionInstructions(parts) !== delivered) return undefined;
+  if (
+    parts.skills !== undefined &&
+    !parts.skills.startsWith(ACP_SKILLS_LISTING_PREFIX)
+  )
+    return undefined;
+  return sha256Hex(parts.contribution);
 }
 
 function launchEnvVars(launchSpec: AcpLaunchSpec): {
@@ -272,7 +309,11 @@ export function buildAcpSessionParams(
   args: BuildAcpSessionParamsArgs,
 ): AcpSessionParams {
   const { options, launchSpec } = args;
-  const instructions = buildAcpSessionInstructions(options);
+  const instructionParts = buildAcpSessionInstructionParts(options);
+  const instructions =
+    instructionParts === undefined
+      ? undefined
+      : composeAcpSessionInstructions(instructionParts);
   const cwd = launchSpec.cwd ?? args.cwd;
   const envVars = {
     ...launchSpec.env,
@@ -315,6 +356,7 @@ export function buildAcpSessionParams(
     workspaceWriteRoots: [cwd, ...args.additionalWorkspaceWriteRoots],
     ...(Object.keys(envVars).length > 0 ? { envVars } : {}),
     ...(instructions ? { instructions } : {}),
+    ...(instructions && instructionParts ? { instructionParts } : {}),
     ...(args.dynamicTools && args.dynamicTools.length > 0
       ? { dynamicTools: args.dynamicTools }
       : {}),

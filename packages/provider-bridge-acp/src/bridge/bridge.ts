@@ -82,6 +82,7 @@ import {
   resolveAcpPermissionDecision,
 } from "../interactions.js";
 import {
+  acknowledgedAcpInstructionContributionDigest,
   buildAcpModelListParams,
   buildAcpSessionParams,
   type AcpAgentCommandParam,
@@ -2005,14 +2006,18 @@ async function startAgentSession(
           })
           .strict(),
       });
+      const contributionDigest =
+        configured.instructions.status === "observed"
+          ? acknowledgedAcpInstructionContributionDigest(
+              params,
+              configured.instructions.instructionsDigest,
+            )
+          : undefined;
       if (
         configured.sessionId !== sessionId ||
         configured.generation !== params.configurationGeneration ||
         configured.instructions.status !== "observed" ||
-        configured.instructions.instructionsDigest !==
-          createHash("sha256")
-            .update(params.instructions ?? "")
-            .digest("hex")
+        contributionDigest === undefined
       )
         throw new Error(
           "Hermes native configuration acknowledgement does not match this exact session",
@@ -2029,7 +2034,10 @@ async function startAgentSession(
       session.configurationReadback = {
         ...UNAVAILABLE_PROVIDER_CONFIGURATION_READBACK,
         skills: configured.skills,
-        instructions: configured.instructions,
+        instructions: {
+          ...configured.instructions,
+          instructionsDigest: contributionDigest,
+        },
         nativeInstructions: configured.nativeInstructions,
         nativeMcp: configured.nativeMcp,
         ...(configured.nativeConversation === undefined

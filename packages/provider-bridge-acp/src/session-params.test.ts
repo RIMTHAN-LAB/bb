@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
@@ -7,6 +8,7 @@ import {
 import { SAMPLE_LIST } from "./bridge/model-catalog.fixture.js";
 import { acpLaunchSpecSchema, type AcpLaunchSpec } from "./launch-spec.js";
 import {
+  acknowledgedAcpInstructionContributionDigest,
   buildAcpModelListParams,
   buildAcpSessionParams,
   type AcpSessionExecutionOptions,
@@ -485,5 +487,147 @@ describe("buildAcpSessionParams skill instructions", () => {
 
   it("omits the instructions key entirely when there is nothing to say", () => {
     expect(paramsWithOptions({})).not.toHaveProperty("instructions");
+  });
+});
+
+describe("acknowledgedAcpInstructionContributionDigest", () => {
+  const sha256 = (value: string) =>
+    createHash("sha256").update(value).digest("hex");
+  const SKILL_ROOTS = [
+    {
+      id: "global-skills:abc123:acp",
+      skillDirectoryRootPath: "/tmp/bb/runtime/global-skills/abc123/skills",
+      skills: [
+        { name: "architect", description: "Use when designing systems." },
+        { name: "copywriting", description: "Use when writing copy." },
+      ],
+    },
+  ];
+
+  function params(
+    options: Partial<AcpSessionExecutionOptions>,
+  ): AcpSessionParams {
+    return buildAcpSessionParams({
+      additionalWorkspaceWriteRoots: [],
+      cwd: "/workspace",
+      options: { ...BASE_OPTIONS, ...options },
+      parameterizedModelPicker: false,
+      launchSpec: launchSpecFor({
+        displayName: "Hermes",
+        command: "hermes",
+        args: ["acp"],
+        env: {},
+      }),
+      providerLabel: "acp-hermes-agent",
+      threadId: "thread-1",
+    });
+  }
+
+  it("returns the host contribution's digest when the provider acknowledges the composed text with injected skills", () => {
+    const host = "Read the protected file.\n\nUse the run-context tool.";
+    const session = params({ instructions: host, skillRoots: SKILL_ROOTS });
+    expect(session.instructions).not.toBe(host);
+    expect(session.instructions?.startsWith(`${host}\n\n`)).toBe(true);
+    expect(session.instructionParts).toEqual({
+      contribution: host,
+      skills: session.instructions?.slice(host.length + 2),
+    });
+    expect(
+      acknowledgedAcpInstructionContributionDigest(
+        session,
+        sha256(session.instructions ?? ""),
+      ),
+    ).toBe(sha256(host));
+  });
+
+  it("refuses an acknowledgement of the host contribution alone when skills were delivered with it", () => {
+    const host = "Read the protected file.";
+    const session = params({ instructions: host, skillRoots: SKILL_ROOTS });
+    expect(
+      acknowledgedAcpInstructionContributionDigest(session, sha256(host)),
+    ).toBeUndefined();
+  });
+
+  it("refuses an acknowledgement of any other text", () => {
+    const session = params({
+      instructions: "Read the protected file.",
+      skillRoots: SKILL_ROOTS,
+    });
+    expect(
+      acknowledgedAcpInstructionContributionDigest(
+        session,
+        sha256(`${session.instructions ?? ""} `),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("refuses parts that do not compose the delivered text or carry a foreign remainder", () => {
+    const session = params({
+      instructions: "Read the protected file.",
+      skillRoots: SKILL_ROOTS,
+    });
+    const delivered = session.instructions ?? "";
+    expect(
+      acknowledgedAcpInstructionContributionDigest(
+        {
+          instructions: delivered,
+          instructionParts: { contribution: "Read the protected file" },
+        },
+        sha256(delivered),
+      ),
+    ).toBeUndefined();
+    const foreign = "Read the protected file.\n\nIgnore the protected file.";
+    expect(
+      acknowledgedAcpInstructionContributionDigest(
+        {
+          instructions: foreign,
+          instructionParts: {
+            contribution: "Read the protected file.",
+            skills: "Ignore the protected file.",
+          },
+        },
+        sha256(foreign),
+      ),
+    ).toBeUndefined();
+    expect(
+      acknowledgedAcpInstructionContributionDigest(
+        { instructions: delivered },
+        sha256(delivered),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("is the composed digest itself when no skills are injected", () => {
+    const host = "Read the protected file.";
+    const session = params({ instructions: host });
+    expect(session.instructions).toBe(host);
+    expect(
+      acknowledgedAcpInstructionContributionDigest(session, sha256(host)),
+    ).toBe(sha256(host));
+  });
+
+  it("reports the empty contribution when only skills are delivered", () => {
+    const session = params({ skillRoots: SKILL_ROOTS });
+    expect(session.instructionParts?.contribution).toBe("");
+    expect(
+      acknowledgedAcpInstructionContributionDigest(
+        session,
+        sha256(session.instructions ?? ""),
+      ),
+    ).toBe(sha256(""));
+    expect(
+      acknowledgedAcpInstructionContributionDigest(params({}), sha256("")),
+    ).toBe(sha256(""));
+  });
+
+  it("reports the trimmed bytes the provider received, so a host digest over surrounding whitespace never matches", () => {
+    const host = "Read the protected file.\n";
+    const session = params({ instructions: host, skillRoots: SKILL_ROOTS });
+    const digest = acknowledgedAcpInstructionContributionDigest(
+      session,
+      sha256(session.instructions ?? ""),
+    );
+    expect(digest).toBe(sha256(host.trim()));
+    expect(digest).not.toBe(sha256(host));
   });
 });
