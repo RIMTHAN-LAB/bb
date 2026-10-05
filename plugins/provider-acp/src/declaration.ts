@@ -45,7 +45,7 @@ export function acpProviderDeclaration(
 ): PluginProviderDeclaration {
   return {
     id: agent.id,
-    ...(agent.id === "acp-hermes"
+    ...(agent.id === "acp-hermes-agent"
       ? {
           experimental_supportsNativeContext: true,
           deriveProviderOptions: (
