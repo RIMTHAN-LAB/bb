@@ -80,6 +80,7 @@ import { isPreStartThreadStatus } from "./thread-status.js";
 import { queueInputForStartingTurn } from "./thread-turn-starting.js";
 import {
   ensureThreadIsWritable,
+  formatAgentThreadInput,
   resolveMessageSenderThreadId,
   sendThreadMessage,
   type SendThreadMessageTransactionPreflight,
@@ -513,6 +514,7 @@ async function runDispatchAttempt(
         claimed,
         payload: resolvedPayload,
         respectManualStopPause,
+        senderThreadId: args.retryOf === undefined ? senderThreadId : null,
         startContext: args.startContext ?? retryStartContext,
         thread,
       });
@@ -690,6 +692,7 @@ interface AdmitPendingThreadArgs {
   claimed: ClaimedQueuedThreadMessageRow[] | null;
   payload: SendMessageRequest & { inputGroups?: PromptInput[][] };
   respectManualStopPause: boolean;
+  senderThreadId: string | null;
   /** Creation's own record; null on a re-attempt, which reads it back. */
   startContext: PendingThreadStartContext | null;
   thread: Thread;
@@ -776,10 +779,17 @@ async function admitPendingThread(
           environmentIntent: startContext.environmentIntent,
           execution,
           fork: startContext.fork,
-          input: args.payload.input,
+          input:
+            args.senderThreadId === null
+              ? args.payload.input
+              : formatAgentThreadInput({
+                  input: args.payload.input,
+                  senderThreadId: args.senderThreadId,
+                }),
           ...(startContext.providerInput === undefined
             ? {}
             : { providerInput: startContext.providerInput }),
+          senderThreadId: args.senderThreadId,
           startedOnBehalfOf: startContext.startedOnBehalfOf,
           titleProvided: startContext.titleProvided,
         });

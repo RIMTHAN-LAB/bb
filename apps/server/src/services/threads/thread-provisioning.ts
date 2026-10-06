@@ -59,6 +59,7 @@ interface RequestThreadProvisionArgs {
   fork: ThreadForkDescriptor | null;
   input: PromptInput[];
   providerInput?: PromptInput[];
+  senderThreadId?: string | null;
   startedOnBehalfOf: StartedOnBehalfOf | null;
   thread: Thread;
   titleProvided: boolean;
@@ -289,7 +290,7 @@ export function requestThreadProvision(
   return deps.db.transaction(() => {
     const { initiator, senderThreadId } = resolveDispatchAuthor({
       retrying: false,
-      senderThreadId: null,
+      senderThreadId: args.senderThreadId ?? null,
       startedOnBehalfOf: args.startedOnBehalfOf,
     });
     const target: TurnRequestTarget = { kind: "thread-start" };
